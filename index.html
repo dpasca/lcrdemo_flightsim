@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>F-14 Retro Flight Sim</title>
+  </head>
+  <body>
+    <canvas id="sim"></canvas>
+    <div id="hud" aria-label="Flight instruments">
+      <section class="hud-panel hud-panel--left">
+        <div class="readout"><span>SPD</span><strong id="speed">000</strong></div>
+        <div class="readout"><span>ALT</span><strong id="altitude">0000</strong></div>
+        <div class="readout"><span>THR</span><strong id="throttle">00%</strong></div>
+      </section>
+      <div class="reticle" aria-hidden="true"></div>
+      <section class="hud-panel hud-panel--right">
+        <div class="readout"><span>BNK</span><strong id="bank">00</strong></div>
+        <div class="readout"><span>HDG</span><strong id="heading">000</strong></div>
+        <div class="readout"><span>LOD</span><strong id="lod">3</strong></div>
+      </section>
+      <div class="throttle-rail" aria-hidden="true"><div id="throttle-fill"></div></div>
+      <div class="stick-dot" id="stick-dot" aria-hidden="true"></div>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
