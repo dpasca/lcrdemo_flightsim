@@ -361,7 +361,7 @@ function updateFlight(delta: number) {
   flight.roll = THREE.MathUtils.clamp(flight.roll, -1.28, 1.28);
 
   const bankTurn = Math.sin(flight.roll) * 0.52 * authority;
-  flight.yaw += (bankTurn + input.yaw * 0.34) * delta;
+  flight.yaw -= (bankTurn + input.yaw * 0.34) * delta;
   flight.roll = damp(flight.roll, 0, input.roll === 0 ? 0.34 : 0.08, delta);
 
   const ground = heightAt(flight.position.x, flight.position.z) + 72;
@@ -369,7 +369,7 @@ function updateFlight(delta: number) {
   flight.pitch = Math.max(flight.pitch, minPitch);
 
   flight.quaternion.setFromEuler(
-    new THREE.Euler(flight.pitch, flight.yaw, flight.roll, "YXZ"),
+    new THREE.Euler(flight.pitch, flight.yaw, -flight.roll, "YXZ"),
   );
 
   forward.set(0, 0, -1).applyQuaternion(flight.quaternion);
