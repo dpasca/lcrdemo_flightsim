@@ -145,6 +145,33 @@ body {
   box-shadow: 0 0 0 5px rgba(125, 229, 255, 0.16);
 }
 
+.view-badge {
+  position: absolute;
+  top: clamp(14px, 3vh, 32px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 6px 14px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  color: #7de5ff;
+  border: 1px solid rgba(125, 229, 255, 0.42);
+  background: rgba(6, 17, 25, 0.62);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(5px);
+}
+
+.view-badge[data-mode="orbit"] {
+  color: #ffe79d;
+  border-color: rgba(255, 231, 157, 0.55);
+}
+
+.view-badge::after {
+  content: "  [V]";
+  color: rgba(248, 230, 176, 0.55);
+  font-weight: 600;
+}
+
 @media (max-width: 720px) {
   .hud-panel {
     min-width: 102px;
