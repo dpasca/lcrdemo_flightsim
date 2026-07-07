@@ -107,6 +107,29 @@ const up = new THREE.Vector3();
 const cameraTarget = new THREE.Vector3();
 const cameraDesired = new THREE.Vector3();
 
+type ViewMode = "chase" | "orbit";
+const view: {
+  mode: ViewMode;
+  azimuth: number;
+  elevation: number;
+  radius: number;
+  targetPos: THREE.Vector3;
+  dragging: boolean;
+  pointerId: number;
+  lastX: number;
+  lastY: number;
+} = {
+  mode: "chase",
+  azimuth: Math.PI * 0.25,
+  elevation: 0.32,
+  radius: 46,
+  targetPos: new THREE.Vector3(),
+  dragging: false,
+  pointerId: -1,
+  lastX: 0,
+  lastY: 0,
+};
+
 const speedEl = mustElement("#speed");
 const altitudeEl = mustElement("#altitude");
 const throttleEl = mustElement("#throttle");
@@ -115,6 +138,7 @@ const headingEl = mustElement("#heading");
 const lodEl = mustElement("#lod");
 const throttleFillEl = mustElement("#throttle-fill");
 const stickDotEl = mustElement("#stick-dot");
+const viewBadgeEl = mustElement("#view-badge");
 
 const aircraft = createF14();
 scene.add(aircraft.root);
@@ -172,6 +196,10 @@ const pointer = {
 };
 
 window.addEventListener("keydown", (event) => {
+  if (event.code === "KeyV" && !event.repeat) {
+    toggleViewMode();
+    return;
+  }
   keys.add(event.code);
 });
 
@@ -181,6 +209,15 @@ window.addEventListener("keyup", (event) => {
 
 canvas.addEventListener("pointerdown", (event) => {
   canvas.setPointerCapture(event.pointerId);
+
+  if (view.mode === "orbit") {
+    view.dragging = true;
+    view.pointerId = event.pointerId;
+    view.lastX = event.clientX;
+    view.lastY = event.clientY;
+    return;
+  }
+
   pointer.active = true;
   pointer.id = event.pointerId;
   pointer.startX = event.clientX;
@@ -188,6 +225,16 @@ canvas.addEventListener("pointerdown", (event) => {
 });
 
 canvas.addEventListener("pointermove", (event) => {
+  if (view.mode === "orbit" && view.dragging && event.pointerId === view.pointerId) {
+    const dx = event.clientX - view.lastX;
+    const dy = event.clientY - view.lastY;
+    view.lastX = event.clientX;
+    view.lastY = event.clientY;
+    view.azimuth -= dx * 0.0065;
+    view.elevation = THREE.MathUtils.clamp(view.elevation + dy * 0.0065, -0.45, 1.35);
+    return;
+  }
+
   if (!pointer.active || event.pointerId !== pointer.id) {
     return;
   }
@@ -205,6 +252,14 @@ canvas.addEventListener("pointermove", (event) => {
 });
 
 canvas.addEventListener("pointerup", (event) => {
+  if (event.pointerId === view.pointerId) {
+    view.dragging = false;
+  }
+
+  if (view.mode === "orbit") {
+    return;
+  }
+
   if (event.pointerId !== pointer.id) {
     return;
   }
@@ -218,6 +273,16 @@ canvas.addEventListener(
   "wheel",
   (event) => {
     event.preventDefault();
+
+    if (view.mode === "orbit") {
+      view.radius = THREE.MathUtils.clamp(
+        view.radius + event.deltaY * 0.04,
+        12,
+        220,
+      );
+      return;
+    }
+
     flight.throttle = THREE.MathUtils.clamp(
       flight.throttle - event.deltaY * 0.00075,
       0,
@@ -243,10 +308,16 @@ function tick() {
 
   const delta = Math.min(clock.getDelta(), 0.045);
   updateInput(delta);
-  updateFlight(delta);
-  updateAircraft(delta);
+
+  if (view.mode === "chase") {
+    updateFlight(delta);
+    updateAircraft(delta);
+  } else {
+    updateAircraft(delta);
+  }
+
   terrain.update(flight.position);
-  updateCamera(delta);
+  updateCamera(delta, view.mode);
   updateHud();
   renderer.render(scene, camera);
   animationFrameId = requestAnimationFrame(tick);
@@ -340,7 +411,27 @@ function updateAircraft(delta: number) {
   aircraft.afterburnerRight.scale.z = aircraft.afterburnerLeft.scale.z;
 }
 
-function updateCamera(delta: number) {
+function updateCamera(delta: number, mode: ViewMode) {
+  if (mode === "orbit") {
+    const cosE = Math.cos(view.elevation);
+    const sinE = Math.sin(view.elevation);
+    const cosA = Math.cos(view.azimuth);
+    const sinA = Math.sin(view.azimuth);
+
+    cameraDesired.set(
+      view.targetPos.x + view.radius * cosE * sinA,
+      view.targetPos.y + view.radius * sinE,
+      view.targetPos.z + view.radius * cosE * cosA,
+    );
+    camera.position.lerp(cameraDesired, 1 - Math.exp(-delta * 8));
+    cameraTarget.copy(view.targetPos);
+    camera.lookAt(cameraTarget);
+
+    sun.target.position.copy(view.targetPos);
+    sun.position.copy(view.targetPos).add(new THREE.Vector3(-580, 940, 360));
+    return;
+  }
+
   const chaseDistance = THREE.MathUtils.lerp(58, 88, flight.speed / 760);
   const cameraHeight = THREE.MathUtils.lerp(15, 25, flight.speed / 760);
 
@@ -361,6 +452,24 @@ function updateCamera(delta: number) {
 
   sun.target.position.copy(flight.position);
   sun.position.copy(flight.position).add(new THREE.Vector3(-580, 940, 360));
+}
+
+function toggleViewMode() {
+  if (view.mode === "chase") {
+    view.mode = "orbit";
+    view.targetPos.copy(flight.position);
+    view.azimuth = flight.yaw;
+    view.elevation = 0.22;
+    view.radius = 46;
+    pointer.active = false;
+    input.pointerPitch = 0;
+    input.pointerRoll = 0;
+  } else {
+    view.mode = "chase";
+    view.dragging = false;
+  }
+  viewBadgeEl.textContent = view.mode === "chase" ? "CHASE" : "ORBIT";
+  viewBadgeEl.dataset.mode = view.mode;
 }
 
 function updateHud() {
@@ -386,7 +495,7 @@ function updateHud() {
 function createF14() {
   const root = new THREE.Group();
   root.name = "Procedural low-poly F-14 Tomcat";
-  root.scale.setScalar(2.65);
+  root.scale.setScalar(4.5);
 
   const paint = new THREE.MeshStandardMaterial({
     color: 0xa9adb0,
