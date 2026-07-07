@@ -892,8 +892,8 @@ function terrainGeometry(
       const p2 = terrainPoint(x1, z1);
       const p3 = terrainPoint(x0, z1);
 
-      addTerrainTriangle(positions, colors, p0, p1, p2, offsetX, offsetZ);
-      addTerrainTriangle(positions, colors, p2, p3, p0, offsetX, offsetZ);
+      addTerrainTriangle(positions, colors, p0, p2, p1, offsetX, offsetZ);
+      addTerrainTriangle(positions, colors, p2, p0, p3, offsetX, offsetZ);
     }
   }
 
