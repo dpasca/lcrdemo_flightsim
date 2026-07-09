@@ -48,6 +48,24 @@ sun.shadow.camera.bottom = -1750;
 scene.add(sun);
 scene.add(sun.target);
 
+const F14_FT_TO_UNIT = 0.2;
+const F14_DIMENSIONS = {
+  // NAVAIR 00-110AF14-1, Standard Aircraft Characteristics, F-14A, April 1977.
+  lengthFt: 61.9,
+  heightFt: 16,
+  maxSpanFt: 64.13,
+  sweptSpanFt: 38.2,
+  oversweptSpanFt: 33.29,
+  unsweptLeadingEdgeDeg: 20,
+  sweptLeadingEdgeDeg: 68,
+  oversweptLeadingEdgeDeg: 75,
+  wingPivotButtlineFt: 96.3 / 12,
+  engineDiameterFt: 50.5 / 12,
+};
+const F14_WING_SWEEP_DELTA = THREE.MathUtils.degToRad(
+  F14_DIMENSIONS.sweptLeadingEdgeDeg - F14_DIMENSIONS.unsweptLeadingEdgeDeg,
+);
+
 type FlightState = {
   position: THREE.Vector3;
   quaternion: THREE.Quaternion;
@@ -416,8 +434,8 @@ function updateAircraft(delta: number) {
     THREE.MathUtils.clamp(flight.speed, 250, 700),
     250,
     700,
-    0.14,
-    0.72,
+    0,
+    F14_WING_SWEEP_DELTA,
   );
   aircraft.leftWing.rotation.y = sweep;
   aircraft.rightWing.rotation.y = -sweep;
@@ -427,13 +445,13 @@ function updateAircraft(delta: number) {
   aircraft.rightNozzle.scale.setScalar(nozzleScale);
   aircraft.afterburnerLeft.visible = flight.throttle > 0.82;
   aircraft.afterburnerRight.visible = aircraft.afterburnerLeft.visible;
-  aircraft.afterburnerLeft.scale.z = damp(
-    aircraft.afterburnerLeft.scale.z,
+  aircraft.afterburnerLeft.scale.y = damp(
+    aircraft.afterburnerLeft.scale.y,
     0.75 + flight.throttle * 1.4,
     12,
     delta,
   );
-  aircraft.afterburnerRight.scale.z = aircraft.afterburnerLeft.scale.z;
+  aircraft.afterburnerRight.scale.y = aircraft.afterburnerLeft.scale.y;
 }
 
 function updateCamera(delta: number, mode: ViewMode) {
@@ -520,33 +538,44 @@ function updateHud() {
 
 function createF14() {
   const root = new THREE.Group();
-  root.name = "Procedural low-poly F-14 Tomcat";
+  root.name = "Measured low-poly F-14A Tomcat";
   root.scale.setScalar(4.5);
 
   const paint = new THREE.MeshStandardMaterial({
-    color: 0xa9adb0,
+    color: 0xb8bdc0,
     roughness: 0.78,
     metalness: 0.15,
     flatShading: true,
+    side: THREE.DoubleSide,
   });
   const darkPaint = new THREE.MeshStandardMaterial({
-    color: 0x4a5361,
+    color: 0x4a525d,
     roughness: 0.82,
     metalness: 0.18,
     flatShading: true,
+    side: THREE.DoubleSide,
+  });
+  const radomePaint = new THREE.MeshStandardMaterial({
+    color: 0x858b8e,
+    roughness: 0.84,
+    metalness: 0.12,
+    flatShading: true,
+    side: THREE.DoubleSide,
   });
   const canopyMat = new THREE.MeshStandardMaterial({
-    color: 0x213a54,
-    roughness: 0.42,
+    color: 0x19344d,
+    roughness: 0.34,
     metalness: 0.22,
-    emissive: 0x07131d,
+    emissive: 0x06121d,
     flatShading: true,
+    side: THREE.DoubleSide,
   });
   const intakeMat = new THREE.MeshStandardMaterial({
-    color: 0x232936,
+    color: 0x151b24,
     roughness: 0.9,
     metalness: 0.08,
     flatShading: true,
+    side: THREE.DoubleSide,
   });
   const flameMat = new THREE.MeshBasicMaterial({
     color: 0xff9a2f,
@@ -555,80 +584,75 @@ function createF14() {
     depthWrite: false,
   });
 
-  const fuselage = new THREE.Mesh(
-    taperedBoxGeometry({
-      length: 7.6,
-      frontWidth: 0.72,
-      backWidth: 1.68,
-      frontHeight: 0.54,
-      backHeight: 0.92,
-    }),
+  const noseTipFt = -F14_DIMENSIONS.lengthFt / 2;
+  const tailFt = F14_DIMENSIONS.lengthFt / 2;
+
+  const radome = createLoftedMesh(
+    [
+      { z: noseTipFt, halfWidth: 0.08, top: 0.04, upper: 0.02, side: -0.02, lower: -0.07, bottom: -0.1 },
+      { z: -28.2, halfWidth: 0.82, top: 0.62, upper: 0.38, side: -0.02, lower: -0.46, bottom: -0.62 },
+      { z: -25.1, halfWidth: 1.68, top: 1.55, upper: 1.02, side: 0.02, lower: -0.6, bottom: -0.9 },
+    ],
+    radomePaint,
+  );
+  root.add(radome);
+
+  const fuselage = createLoftedMesh(
+    [
+      { z: -25.1, halfWidth: 1.68, top: 1.55, upper: 1.02, side: 0.02, lower: -0.6, bottom: -0.9 },
+      { z: -21.5, halfWidth: 2.35, top: 2.32, upper: 1.5, side: 0, lower: -0.72, bottom: -1.04 },
+      { z: -16.2, halfWidth: 2.95, top: 2.92, upper: 1.86, side: -0.02, lower: -0.84, bottom: -1.15 },
+      { z: -9.4, halfWidth: 3.35, top: 2.62, upper: 1.56, side: -0.12, lower: -0.9, bottom: -1.2 },
+      { z: -2.4, halfWidth: 3.15, top: 2.34, upper: 1.34, side: -0.18, lower: -0.9, bottom: -1.18 },
+      { z: 8.7, halfWidth: 2.92, top: 2.1, upper: 1.18, side: -0.2, lower: -0.84, bottom: -1.08 },
+      { z: 17.8, halfWidth: 2.35, top: 1.92, upper: 0.96, side: -0.2, lower: -0.72, bottom: -0.92 },
+      { z: 25.5, halfWidth: 1.45, top: 1.3, upper: 0.58, side: -0.15, lower: -0.42, bottom: -0.58 },
+      { z: tailFt - 0.85, halfWidth: 0.72, top: 0.75, upper: 0.35, side: -0.08, lower: -0.28, bottom: -0.38 },
+    ],
     paint,
   );
-  fuselage.position.z = 0.75;
-  fuselage.castShadow = true;
   root.add(fuselage);
 
-  const spine = new THREE.Mesh(
-    taperedBoxGeometry({
-      length: 4.6,
-      frontWidth: 0.52,
-      backWidth: 1.08,
-      frontHeight: 0.22,
-      backHeight: 0.36,
-    }),
+  const canopyBase = createLoftedMesh(
+    [
+      { z: -24.7, halfWidth: 1.28, top: 2.22, upper: 2.06, side: 1.84, lower: 1.72, bottom: 1.66 },
+      { z: -20.5, halfWidth: 1.76, top: 2.82, upper: 2.58, side: 2.32, lower: 2.16, bottom: 2.08 },
+      { z: -14.1, halfWidth: 1.92, top: 2.98, upper: 2.72, side: 2.48, lower: 2.3, bottom: 2.2 },
+      { z: -11.3, halfWidth: 1.28, top: 2.74, upper: 2.52, side: 2.28, lower: 2.12, bottom: 2.04 },
+    ],
     darkPaint,
   );
-  spine.position.set(0, 0.56, 0.9);
-  spine.castShadow = true;
-  root.add(spine);
+  root.add(canopyBase);
 
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.48, 3.25, 5, 1), paint);
-  nose.rotation.x = -Math.PI / 2;
-  nose.position.z = -4.65;
-  nose.castShadow = true;
-  root.add(nose);
-
-  const canopy = new THREE.Mesh(canopyGeometry(), canopyMat);
-  canopy.position.set(0, 0.76, -2.4);
-  canopy.castShadow = true;
+  const canopy = createCanopy(canopyMat);
   root.add(canopy);
 
-  const neck = new THREE.Mesh(
-    taperedBoxGeometry({
-      length: 1.6,
-      frontWidth: 0.7,
-      backWidth: 1.55,
-      frontHeight: 0.48,
-      backHeight: 0.72,
-    }),
+  const dorsalSpine = createLoftedMesh(
+    [
+      { z: -12.2, halfWidth: 1.1, top: 2.72, upper: 2.5, side: 2.25, lower: 2.08, bottom: 1.98 },
+      { z: 0.5, halfWidth: 1.46, top: 2.58, upper: 2.32, side: 2.02, lower: 1.88, bottom: 1.78 },
+      { z: 14.6, halfWidth: 1.22, top: 2.32, upper: 2.04, side: 1.76, lower: 1.62, bottom: 1.54 },
+      { z: 22.4, halfWidth: 0.66, top: 1.75, upper: 1.52, side: 1.3, lower: 1.16, bottom: 1.08 },
+    ],
     paint,
   );
-  neck.position.set(0, 0.03, -1.45);
-  neck.castShadow = true;
-  root.add(neck);
+  root.add(dorsalSpine);
+
+  root.add(createChinPod(intakeMat), createPitotProbe(darkPaint));
+  root.add(createShoulderFairing(-1, paint), createShoulderFairing(1, paint));
 
   const leftWing = createWing(-1, paint);
   const rightWing = createWing(1, paint);
   root.add(leftWing, rightWing);
+
+  root.add(createWingGlove(-1, paint), createWingGlove(1, paint));
 
   const leftIntake = createIntake(-1, intakeMat, paint);
   const rightIntake = createIntake(1, intakeMat, paint);
   root.add(leftIntake, rightIntake);
 
   const nacelles = [-1, 1].map((side) => {
-    const nacelle = new THREE.Mesh(
-      taperedBoxGeometry({
-        length: 5.7,
-        frontWidth: 0.62,
-        backWidth: 0.82,
-        frontHeight: 0.54,
-        backHeight: 0.68,
-      }),
-      darkPaint,
-    );
-    nacelle.position.set(side * 0.72, -0.16, 1.55);
-    nacelle.castShadow = true;
+    const nacelle = createEngineNacelle(side as -1 | 1, darkPaint);
     root.add(nacelle);
     return nacelle;
   });
@@ -648,6 +672,8 @@ function createF14() {
   const stabilizerLeft = createStabilizer(-1, paint);
   const stabilizerRight = createStabilizer(1, paint);
   root.add(stabilizerLeft, stabilizerRight);
+
+  root.add(createVentralFin(-1, darkPaint), createVentralFin(1, darkPaint));
 
   const bellyRails = createBellyOrdnance(paint, darkPaint);
   root.add(bellyRails);
@@ -673,58 +699,161 @@ function createF14() {
   };
 }
 
-function createWing(side: -1 | 1, material: THREE.Material) {
-  const group = new THREE.Group();
-  group.position.set(side * 0.55, -0.03, -0.32);
+type LoftStation = {
+  z: number;
+  halfWidth: number;
+  top: number;
+  upper: number;
+  side: number;
+  lower: number;
+  bottom: number;
+};
 
-  const thickness = 0.08;
-  const sx = side;
-  const top = thickness * 0.5;
-  const bottom = -thickness * 0.5;
-  const pointsTop: THREE.Vector3[] = [
-    new THREE.Vector3(0, top, -0.72),
-    new THREE.Vector3(sx * 4.85, top, -0.1),
-    new THREE.Vector3(sx * 5.55, top, 0.62),
-    new THREE.Vector3(sx * 0.24, top, 2.35),
-  ];
-  const pointsBottom = pointsTop.map((point) => point.clone().setY(bottom));
+type PlanformPoint = {
+  x: number;
+  z: number;
+};
+
+type ShoulderRow = {
+  z: number;
+  innerX: number;
+  outerX: number;
+  innerY: number;
+  outerY: number;
+};
+
+function ft(value: number) {
+  return value * F14_FT_TO_UNIT;
+}
+
+function vft(x: number, y: number, z: number) {
+  return new THREE.Vector3(ft(x), ft(y), ft(z));
+}
+
+function createLoftedMesh(stations: LoftStation[], material: THREE.Material) {
+  const mesh = new THREE.Mesh(loftedSectionGeometry(stations), material);
+  mesh.castShadow = true;
+  return mesh;
+}
+
+function loftedSectionGeometry(stations: LoftStation[]) {
+  const profiles = stations.map(profileFromStation);
   const positions: number[] = [];
+  const vertexCount = profiles[0]?.length ?? 0;
 
-  addQuad(positions, pointsTop[0], pointsTop[1], pointsTop[2], pointsTop[3]);
-  addQuad(positions, pointsBottom[3], pointsBottom[2], pointsBottom[1], pointsBottom[0]);
+  for (let i = 0; i < profiles.length - 1; i += 1) {
+    const current = profiles[i];
+    const nextProfile = profiles[i + 1];
 
-  for (let i = 0; i < pointsTop.length; i += 1) {
-    const next = (i + 1) % pointsTop.length;
-    addQuad(
-      positions,
-      pointsTop[i],
-      pointsTop[next],
-      pointsBottom[next],
-      pointsBottom[i],
-    );
+    for (let j = 0; j < vertexCount; j += 1) {
+      const next = (j + 1) % vertexCount;
+      addQuad(positions, current[j], current[next], nextProfile[next], nextProfile[j]);
+    }
   }
 
-  const geometry = bufferGeometryFromPositions(positions);
-  const wing = new THREE.Mesh(geometry, material);
-  wing.castShadow = true;
-  group.add(wing);
+  addPolygon(positions, [...profiles[0]].reverse());
+  addPolygon(positions, profiles[profiles.length - 1]);
 
-  const glove = new THREE.Mesh(
-    taperedBoxGeometry({
-      length: 1.9,
-      frontWidth: 1.1,
-      backWidth: 1.72,
-      frontHeight: 0.16,
-      backHeight: 0.18,
-    }),
+  return bufferGeometryFromPositions(positions);
+}
+
+function profileFromStation(station: LoftStation) {
+  const halfWidth = ft(station.halfWidth);
+  const z = ft(station.z);
+
+  return [
+    new THREE.Vector3(0, ft(station.top), z),
+    new THREE.Vector3(halfWidth * 0.58, ft(station.upper), z),
+    new THREE.Vector3(halfWidth, ft(station.side), z),
+    new THREE.Vector3(halfWidth * 0.62, ft(station.lower), z),
+    new THREE.Vector3(0, ft(station.bottom), z),
+    new THREE.Vector3(-halfWidth * 0.62, ft(station.lower), z),
+    new THREE.Vector3(-halfWidth, ft(station.side), z),
+    new THREE.Vector3(-halfWidth * 0.58, ft(station.upper), z),
+  ];
+}
+
+function createCanopy(glassMaterial: THREE.Material) {
+  const group = new THREE.Group();
+  const glass = createLoftedMesh(
+    [
+      { z: -24.1, halfWidth: 0.88, top: 2.78, upper: 2.58, side: 2.28, lower: 2.16, bottom: 2.08 },
+      { z: -21.5, halfWidth: 1.52, top: 4.55, upper: 3.58, side: 2.58, lower: 2.42, bottom: 2.34 },
+      { z: -18.45, halfWidth: 1.68, top: 4.86, upper: 3.78, side: 2.66, lower: 2.46, bottom: 2.36 },
+      { z: -15.2, halfWidth: 1.5, top: 4.36, upper: 3.38, side: 2.58, lower: 2.38, bottom: 2.28 },
+      { z: -12.9, halfWidth: 0.82, top: 3.08, upper: 2.82, side: 2.38, lower: 2.2, bottom: 2.1 },
+    ],
+    glassMaterial,
+  );
+  group.add(glass);
+  return group;
+}
+
+function createWing(side: -1 | 1, material: THREE.Material) {
+  const group = new THREE.Group();
+  const pivotXFt = F14_DIMENSIONS.wingPivotButtlineFt;
+  const movableSpanFt = F14_DIMENSIONS.maxSpanFt / 2 - pivotXFt;
+  const sweepOffsetFt =
+    Math.tan(THREE.MathUtils.degToRad(F14_DIMENSIONS.unsweptLeadingEdgeDeg)) *
+    movableSpanFt;
+
+  group.position.set(side * ft(pivotXFt), ft(0.24), ft(-4.1));
+
+  const wing = new THREE.Mesh(
+    planformPrismGeometry(
+      [
+        { x: 0, z: -1.15 },
+        { x: side * movableSpanFt, z: -1.15 + sweepOffsetFt },
+        { x: side * (movableSpanFt - 0.55), z: 13.95 },
+        { x: side * 1.25, z: 10.05 },
+        { x: 0, z: 6.25 },
+      ],
+      0.52,
+      -1.83,
+    ),
     material,
   );
-  glove.position.set(side * 0.36, 0.04, 0.56);
-  glove.rotation.z = side * -0.08;
-  glove.castShadow = true;
-  group.add(glove);
+  group.add(wing);
 
   return group;
+}
+
+function createWingGlove(side: -1 | 1, material: THREE.Material) {
+  const glove = new THREE.Mesh(
+    planformPrismGeometry(
+      [
+        { x: side * 3.65, z: -10.6 },
+        { x: side * F14_DIMENSIONS.wingPivotButtlineFt, z: -5.7 },
+        { x: side * 8.45, z: 7.2 },
+        { x: side * 3.35, z: 5.35 },
+      ],
+      0.46,
+      -0.6,
+    ),
+    material,
+  );
+  glove.position.y = ft(0.2);
+  return glove;
+}
+
+function createShoulderFairing(side: -1 | 1, material: THREE.Material) {
+  const mesh = new THREE.Mesh(
+    shoulderFairingGeometry(
+      side,
+      [
+        { z: -13.4, innerX: 2.86, outerX: 3.82, innerY: 1.78, outerY: 0.98 },
+        { z: -8.4, innerX: 3.28, outerX: 3.62, innerY: 1.46, outerY: 0.92 },
+        { z: -1.5, innerX: 3.08, outerX: 3.54, innerY: 1.22, outerY: 0.78 },
+        { z: 8.8, innerX: 2.84, outerX: 3.62, innerY: 1.0, outerY: 0.66 },
+        { z: 18.4, innerX: 2.34, outerX: 3.78, innerY: 0.78, outerY: 0.5 },
+        { z: 25.3, innerX: 1.48, outerX: 3.52, innerY: 0.44, outerY: 0.34 },
+      ],
+      0.2,
+    ),
+    material,
+  );
+  mesh.castShadow = true;
+  return mesh;
 }
 
 function createIntake(
@@ -733,34 +862,69 @@ function createIntake(
   bodyMaterial: THREE.Material,
 ) {
   const group = new THREE.Group();
-  group.position.set(side * 1.02, -0.22, -0.95);
+  group.position.set(side * ft(5.85), ft(-0.34), ft(-12.15));
 
   const scoop = new THREE.Mesh(
     taperedBoxGeometry({
-      length: 1.7,
-      frontWidth: 0.82,
-      backWidth: 0.55,
-      frontHeight: 0.64,
-      backHeight: 0.46,
+      length: ft(6.2),
+      frontWidth: ft(4.3),
+      backWidth: ft(3.75),
+      frontHeight: ft(2.82),
+      backHeight: ft(2.35),
     }),
     bodyMaterial,
   );
+  scoop.rotation.z = side * -0.035;
   scoop.castShadow = true;
   group.add(scoop);
 
   const mouth = new THREE.Mesh(
     taperedBoxGeometry({
-      length: 0.16,
-      frontWidth: 0.72,
-      backWidth: 0.72,
-      frontHeight: 0.45,
-      backHeight: 0.45,
+      length: ft(0.44),
+      frontWidth: ft(3.62),
+      backWidth: ft(3.62),
+      frontHeight: ft(2.22),
+      backHeight: ft(2.22),
     }),
     intakeMaterial,
   );
-  mouth.position.z = -0.91;
+  mouth.position.z = ft(-3.34);
   mouth.castShadow = true;
   group.add(mouth);
+
+  const ramp = new THREE.Mesh(
+    taperedBoxGeometry({
+      length: ft(3.7),
+      frontWidth: ft(3.36),
+      backWidth: ft(3.05),
+      frontHeight: ft(0.22),
+      backHeight: ft(0.18),
+    }),
+    intakeMaterial,
+  );
+  ramp.position.set(0, ft(0.82), ft(-1.65));
+  ramp.rotation.x = -0.08;
+  group.add(ramp);
+
+  return group;
+}
+
+function createEngineNacelle(side: -1 | 1, material: THREE.Material) {
+  const group = new THREE.Group();
+  const engineRadiusFt = F14_DIMENSIONS.engineDiameterFt / 2;
+  group.position.x = side * ft(5.85);
+
+  const pod = createLoftedMesh(
+    [
+      { z: -9.2, halfWidth: engineRadiusFt * 1.08, top: 0.92, upper: 0.48, side: -0.42, lower: -1.34, bottom: -1.72 },
+      { z: -2.0, halfWidth: engineRadiusFt * 1.12, top: 0.82, upper: 0.34, side: -0.5, lower: -1.38, bottom: -1.78 },
+      { z: 12.5, halfWidth: engineRadiusFt * 1.06, top: 0.72, upper: 0.28, side: -0.52, lower: -1.34, bottom: -1.7 },
+      { z: 25.4, halfWidth: engineRadiusFt * 0.96, top: 0.56, upper: 0.16, side: -0.5, lower: -1.22, bottom: -1.52 },
+      { z: 30.25, halfWidth: engineRadiusFt * 0.78, top: 0.42, upper: 0.08, side: -0.48, lower: -1.02, bottom: -1.26 },
+    ],
+    material,
+  );
+  group.add(pod);
 
   return group;
 }
@@ -771,42 +935,48 @@ function createNozzle(side: -1 | 1) {
     roughness: 0.72,
     metalness: 0.34,
     flatShading: true,
+    side: THREE.DoubleSide,
   });
-  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.42, 0.58, 8, 1), material);
+  const nozzle = new THREE.Mesh(
+    new THREE.CylinderGeometry(ft(1.55), ft(F14_DIMENSIONS.engineDiameterFt / 2), ft(2.0), 10, 1),
+    material,
+  );
   nozzle.rotation.x = Math.PI / 2;
-  nozzle.position.set(side * 0.72, -0.15, 4.72);
+  nozzle.position.set(side * ft(5.85), ft(-0.54), ft(30.72));
   nozzle.castShadow = true;
   return nozzle;
 }
 
 function createAfterburner(side: -1 | 1, material: THREE.Material) {
-  const burner = new THREE.Mesh(new THREE.ConeGeometry(0.24, 1.4, 8, 1), material);
+  const burner = new THREE.Mesh(new THREE.ConeGeometry(ft(1.05), ft(4.0), 10, 1), material);
   burner.rotation.x = Math.PI / 2;
-  burner.position.set(side * 0.72, -0.15, 5.38);
+  burner.position.set(side * ft(5.85), ft(-0.54), ft(32.65));
   burner.visible = false;
   return burner;
 }
 
 function createVerticalTail(side: -1 | 1, material: THREE.Material) {
   const group = new THREE.Group();
-  group.position.set(side * 0.86, 0.28, 3.05);
-  group.rotation.z = side * -0.18;
+  group.position.set(side * ft(5.75), ft(1.0), ft(19.0));
+  group.rotation.z = side * -0.16;
 
-  const thickness = 0.08;
-  const sx = side * thickness * 0.5;
+  const thickness = ft(0.44);
+  const sx = thickness * 0.5;
   const positions: number[] = [];
-  const a = new THREE.Vector3(-sx, 0, -0.15);
-  const b = new THREE.Vector3(-sx, 0.08, 1.56);
-  const c = new THREE.Vector3(-sx, 1.92, 0.92);
-  const d = new THREE.Vector3(sx, 0, -0.15);
-  const e = new THREE.Vector3(sx, 0.08, 1.56);
-  const f = new THREE.Vector3(sx, 1.92, 0.92);
+  const left = [
+    new THREE.Vector3(-sx, 0, ft(-3.25)),
+    new THREE.Vector3(-sx, ft(0.26), ft(6.1)),
+    new THREE.Vector3(-sx, ft(10.7), ft(4.7)),
+    new THREE.Vector3(-sx, ft(12.2), ft(1.25)),
+  ];
+  const right = left.map((point) => point.clone().setX(sx));
 
-  addTriangle(positions, a, b, c);
-  addTriangle(positions, f, e, d);
-  addQuad(positions, a, d, e, b);
-  addQuad(positions, b, e, f, c);
-  addQuad(positions, c, f, d, a);
+  addPolygon(positions, left);
+  addPolygon(positions, [...right].reverse());
+  for (let i = 0; i < left.length; i += 1) {
+    const next = (i + 1) % left.length;
+    addQuad(positions, left[i], left[next], right[next], right[i]);
+  }
 
   const tail = new THREE.Mesh(bufferGeometryFromPositions(positions), material);
   tail.castShadow = true;
@@ -816,32 +986,51 @@ function createVerticalTail(side: -1 | 1, material: THREE.Material) {
 
 function createStabilizer(side: -1 | 1, material: THREE.Material) {
   const group = new THREE.Group();
-  group.position.set(side * 1.05, -0.05, 3.78);
-  group.rotation.y = side * -0.28;
+  group.position.set(side * ft(3.15), ft(-0.22), ft(25.4));
+  group.rotation.y = side * -0.18;
   group.rotation.x = 0.04;
 
-  const thickness = 0.06;
-  const sx = side;
-  const top = thickness * 0.5;
-  const bottom = -thickness * 0.5;
-  const p: THREE.Vector3[] = [
-    new THREE.Vector3(0, top, -0.34),
-    new THREE.Vector3(sx * 2.1, top, 0.05),
-    new THREE.Vector3(sx * 2.32, top, 0.8),
-    new THREE.Vector3(0.05 * sx, top, 1.04),
-  ];
-  const q = p.map((point) => point.clone().setY(bottom));
-  const positions: number[] = [];
-  addQuad(positions, p[0], p[1], p[2], p[3]);
-  addQuad(positions, q[3], q[2], q[1], q[0]);
-  for (let i = 0; i < p.length; i += 1) {
-    const next = (i + 1) % p.length;
-    addQuad(positions, p[i], p[next], q[next], q[i]);
-  }
-
-  const stabilizer = new THREE.Mesh(bufferGeometryFromPositions(positions), material);
+  const stabilizer = new THREE.Mesh(
+    planformPrismGeometry(
+      [
+        { x: 0, z: -2.9 },
+        { x: side * 10.2, z: -0.65 },
+        { x: side * 10.8, z: 3.1 },
+        { x: side * 0.42, z: 5.2 },
+      ],
+      0.42,
+      0,
+    ),
+    material,
+  );
   stabilizer.castShadow = true;
   group.add(stabilizer);
+  return group;
+}
+
+function createVentralFin(side: -1 | 1, material: THREE.Material) {
+  const group = new THREE.Group();
+  group.position.set(side * ft(4.55), ft(-1.35), ft(18.8));
+  group.rotation.z = side * 0.05;
+
+  const thickness = ft(0.26);
+  const sx = thickness * 0.5;
+  const positions: number[] = [];
+  const a = new THREE.Vector3(-sx, 0, ft(-1.6));
+  const b = new THREE.Vector3(-sx, ft(-1.72), ft(2.1));
+  const c = new THREE.Vector3(-sx, 0, ft(5.7));
+  const d = new THREE.Vector3(sx, 0, ft(-1.6));
+  const e = new THREE.Vector3(sx, ft(-1.72), ft(2.1));
+  const f = new THREE.Vector3(sx, 0, ft(5.7));
+
+  addTriangle(positions, a, b, c);
+  addTriangle(positions, f, e, d);
+  addQuad(positions, a, d, e, b);
+  addQuad(positions, b, e, f, c);
+  addQuad(positions, c, f, d, a);
+
+  const fin = new THREE.Mesh(bufferGeometryFromPositions(positions), material);
+  group.add(fin);
   return group;
 }
 
@@ -853,52 +1042,108 @@ function createBellyOrdnance(
   const railMaterial = darkMaterial;
   const missileMaterial = bodyMaterial;
 
-  for (const x of [-0.38, 0.38]) {
+  for (const x of [-1.22, 1.22]) {
     const rail = new THREE.Mesh(
       taperedBoxGeometry({
-        length: 2.5,
-        frontWidth: 0.12,
-        backWidth: 0.12,
-        frontHeight: 0.08,
-        backHeight: 0.08,
+        length: ft(13.2),
+        frontWidth: ft(0.34),
+        backWidth: ft(0.34),
+        frontHeight: ft(0.24),
+        backHeight: ft(0.24),
       }),
       railMaterial,
     );
-    rail.position.set(x, -0.64, 1.25);
+    rail.position.set(ft(x), ft(-1.72), ft(2.4));
     rail.castShadow = true;
     group.add(rail);
 
-    const missile = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 1.65, 6), missileMaterial);
+    const missile = new THREE.Mesh(
+      new THREE.CylinderGeometry(ft(0.52), ft(0.52), ft(12.2), 8),
+      missileMaterial,
+    );
     missile.rotation.x = Math.PI / 2;
-    missile.position.set(x, -0.8, 1.25);
+    missile.position.set(ft(x), ft(-2.08), ft(2.45));
     missile.castShadow = true;
     group.add(missile);
+
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(ft(0.52), ft(1.35), 8), missileMaterial);
+    nose.rotation.x = -Math.PI / 2;
+    nose.position.set(ft(x), ft(-2.08), ft(-4.32));
+    group.add(nose);
   }
 
   return group;
 }
 
-function canopyGeometry() {
+function createChinPod(material: THREE.Material) {
+  const pod = new THREE.Mesh(
+    new THREE.CylinderGeometry(ft(0.36), ft(0.46), ft(0.9), 6, 1),
+    material,
+  );
+  pod.rotation.z = Math.PI / 2;
+  pod.position.set(0, ft(-1.08), ft(-23.6));
+  return pod;
+}
+
+function createPitotProbe(material: THREE.Material) {
+  const probe = new THREE.Mesh(
+    new THREE.CylinderGeometry(ft(0.035), ft(0.055), ft(1.7), 6, 1),
+    material,
+  );
+  probe.rotation.x = Math.PI / 2;
+  probe.position.set(0, ft(0.03), ft(-F14_DIMENSIONS.lengthFt / 2 - 0.82));
+  return probe;
+}
+
+function planformPrismGeometry(
+  points: PlanformPoint[],
+  thicknessFt: number,
+  dihedralDeg: number,
+) {
+  const slope = Math.tan(THREE.MathUtils.degToRad(dihedralDeg));
+  const top = points.map((point) => {
+    const y = Math.abs(point.x) * slope + thicknessFt * 0.5;
+    return vft(point.x, y, point.z);
+  });
+  const bottom = points.map((point) => {
+    const y = Math.abs(point.x) * slope - thicknessFt * 0.5;
+    return vft(point.x, y, point.z);
+  });
   const positions: number[] = [];
-  const front = -0.92;
-  const back = 0.92;
-  const halfFront = 0.24;
-  const halfBack = 0.42;
 
-  const p0 = new THREE.Vector3(-halfFront, 0, front);
-  const p1 = new THREE.Vector3(halfFront, 0, front);
-  const p2 = new THREE.Vector3(halfBack, 0, back);
-  const p3 = new THREE.Vector3(-halfBack, 0, back);
-  const ridgeFront = new THREE.Vector3(0, 0.42, front + 0.15);
-  const ridgeBack = new THREE.Vector3(0, 0.34, back - 0.18);
+  addPolygon(positions, top);
+  addPolygon(positions, [...bottom].reverse());
 
-  addTriangle(positions, p0, p1, ridgeFront);
-  addTriangle(positions, p1, p2, ridgeBack);
-  addTriangle(positions, p1, ridgeBack, ridgeFront);
-  addTriangle(positions, p2, p3, ridgeBack);
-  addTriangle(positions, p3, p0, ridgeFront);
-  addTriangle(positions, p3, ridgeFront, ridgeBack);
-  addQuad(positions, p0, p3, p2, p1);
+  for (let i = 0; i < top.length; i += 1) {
+    const next = (i + 1) % top.length;
+    addQuad(positions, top[i], top[next], bottom[next], bottom[i]);
+  }
+
+  return bufferGeometryFromPositions(positions);
+}
+
+function shoulderFairingGeometry(
+  side: -1 | 1,
+  rows: ShoulderRow[],
+  thicknessFt: number,
+) {
+  const topInner = rows.map((row) => vft(side * row.innerX, row.innerY, row.z));
+  const topOuter = rows.map((row) => vft(side * row.outerX, row.outerY, row.z));
+  const bottomInner = rows.map((row) => vft(side * row.innerX, row.innerY - thicknessFt, row.z));
+  const bottomOuter = rows.map((row) => vft(side * row.outerX, row.outerY - thicknessFt, row.z));
+  const positions: number[] = [];
+
+  for (let i = 0; i < rows.length - 1; i += 1) {
+    const next = i + 1;
+    addQuad(positions, topInner[i], topInner[next], topOuter[next], topOuter[i]);
+    addQuad(positions, bottomInner[next], bottomInner[i], bottomOuter[i], bottomOuter[next]);
+    addQuad(positions, topInner[next], topInner[i], bottomInner[i], bottomInner[next]);
+    addQuad(positions, topOuter[i], topOuter[next], bottomOuter[next], bottomOuter[i]);
+  }
+
+  addQuad(positions, topInner[0], topOuter[0], bottomOuter[0], bottomInner[0]);
+  const last = rows.length - 1;
+  addQuad(positions, topOuter[last], topInner[last], bottomInner[last], bottomOuter[last]);
 
   return bufferGeometryFromPositions(positions);
 }
@@ -1138,6 +1383,12 @@ function addQuad(
 ) {
   addTriangle(positions, a, b, c);
   addTriangle(positions, c, d, a);
+}
+
+function addPolygon(positions: number[], points: THREE.Vector3[]) {
+  for (let i = 1; i < points.length - 1; i += 1) {
+    addTriangle(positions, points[0], points[i], points[i + 1]);
+  }
 }
 
 function addTriangle(
