@@ -61,6 +61,19 @@ body {
   right: clamp(12px, 3vw, 32px);
 }
 
+.minimap {
+  position: absolute;
+  top: calc(clamp(14px, 3vh, 32px) + 112px);
+  right: clamp(12px, 3vw, 32px);
+  width: 160px;
+  height: 160px;
+  border: 1px solid rgba(255, 231, 157, 0.42);
+  background: rgba(6, 17, 25, 0.7);
+  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.24);
+  image-rendering: pixelated;
+  backdrop-filter: blur(5px);
+}
+
 .readout {
   display: grid;
   grid-template-columns: 44px minmax(58px, 1fr);
@@ -186,5 +199,11 @@ body {
   .reticle {
     width: 62px;
     height: 62px;
+  }
+
+  .minimap {
+    top: 122px;
+    width: 112px;
+    height: 112px;
   }
 }
