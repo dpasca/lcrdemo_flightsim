@@ -10,6 +10,7 @@ if (!canvas) {
 const renderer = new THREE.WebGLRenderer({
   canvas,
   antialias: true,
+  logarithmicDepthBuffer: true,
   powerPreference: "high-performance",
 });
 
@@ -23,14 +24,28 @@ renderer.toneMappingExposure = 1.08;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x83c9df);
-scene.fog = new THREE.FogExp2(0x9ec8d1, 0.000055);
+scene.fog = new THREE.FogExp2(0x9ec8d1, 0.000046);
 
 const camera = new THREE.PerspectiveCamera(
   64,
   window.innerWidth / window.innerHeight,
-  0.4,
-  90000,
+  2,
+  108000,
 );
+
+const TAU = Math.PI * 2;
+const SEA_LEVEL = -52;
+const TERRAIN_SNAP_SIZE = 2400;
+const TERRAIN_LEVELS = [
+  { outer: 7200, inner: 0, segments: 62 },
+  { outer: 28000, inner: 7200, segments: 48 },
+  { outer: 76000, inner: 28000, segments: 40 },
+  { outer: 154000, inner: 76000, segments: 30 },
+] as const;
+const WORLD_WRAP_RADIUS = 178000;
+const WORLD_WRAP_SIZE = WORLD_WRAP_RADIUS * 2;
+const MINIMAP_TEXTURE_SIZE = 128;
+const MINIMAP_WORLD_SPAN = TERRAIN_LEVELS[TERRAIN_LEVELS.length - 1].outer;
 
 const hemiLight = new THREE.HemisphereLight(0xc7edf2, 0x4b4538, 1.85);
 scene.add(hemiLight);
@@ -114,6 +129,7 @@ const localRotation = new THREE.Quaternion();
 const attitudeEuler = new THREE.Euler(0, 0, 0, "YXZ");
 const cameraTarget = new THREE.Vector3();
 const cameraDesired = new THREE.Vector3();
+const wrapOffset = new THREE.Vector3();
 
 type ViewMode = "chase" | "orbit";
 const view: {
@@ -149,6 +165,19 @@ const lodEl = mustElement("#lod");
 const throttleFillEl = mustElement("#throttle-fill");
 const stickDotEl = mustElement("#stick-dot");
 const viewBadgeEl = mustElement("#view-badge");
+const minimapCanvas = mustElement<HTMLCanvasElement>("#minimap");
+const minimapContext = minimapCanvas.getContext("2d");
+const minimapTerrainCanvas = document.createElement("canvas");
+minimapTerrainCanvas.width = MINIMAP_TEXTURE_SIZE;
+minimapTerrainCanvas.height = MINIMAP_TEXTURE_SIZE;
+const minimapTerrainContext = minimapTerrainCanvas.getContext("2d");
+
+if (!minimapContext || !minimapTerrainContext) {
+  throw new Error("Missing minimap canvas context");
+}
+
+const minimapCtx = minimapContext;
+const minimapTerrainCtx = minimapTerrainContext;
 
 const aircraft = createF14();
 scene.add(aircraft.root);
@@ -180,17 +209,15 @@ if (import.meta.env.DEV) {
 }
 
 const sea = new THREE.Mesh(
-  new THREE.PlaneGeometry(90000, 90000, 1, 1),
+  new THREE.PlaneGeometry(220000, 220000, 1, 1),
   new THREE.MeshStandardMaterial({
     color: 0x1d5a78,
     roughness: 0.83,
     metalness: 0.06,
-    transparent: true,
-    opacity: 0.82,
   }),
 );
 sea.rotation.x = -Math.PI / 2;
-sea.position.y = -52;
+sea.position.y = SEA_LEVEL;
 sea.receiveShadow = true;
 scene.add(sea);
 
@@ -321,12 +348,12 @@ function tick() {
 
   if (view.mode === "chase") {
     updateFlight(delta);
-    updateAircraft(delta);
-  } else {
-    updateAircraft(delta);
   }
 
+  wrapWorldIfNeeded();
+  updateAircraft(delta);
   terrain.update(flight.position);
+  updateWorldAnchors();
   updateCamera(delta, view.mode);
   updateHud();
   renderer.render(scene, camera);
@@ -396,16 +423,47 @@ function updateFlight(delta: number) {
   applyWorldRotation(worldYawAxis, -bankTurn * delta);
   syncFlightAnglesFromQuaternion();
 
-  const ground = heightAt(flight.position.x, flight.position.z) + 72;
-
   forward.set(0, 0, -1).applyQuaternion(flight.quaternion);
   flight.position.addScaledVector(forward, flight.speed * delta);
+
+  const ground = heightAt(flight.position.x, flight.position.z) + 72;
 
   if (flight.position.y < ground) {
     flight.position.y = ground;
     flight.speed = Math.max(flight.speed * 0.965, 190);
     flight.angularVelocity.x = Math.max(flight.angularVelocity.x, 0);
   }
+}
+
+function wrapWorldIfNeeded() {
+  wrapOffset.set(0, 0, 0);
+
+  if (flight.position.x > WORLD_WRAP_RADIUS) {
+    wrapOffset.x = -WORLD_WRAP_SIZE;
+  } else if (flight.position.x < -WORLD_WRAP_RADIUS) {
+    wrapOffset.x = WORLD_WRAP_SIZE;
+  }
+
+  if (flight.position.z > WORLD_WRAP_RADIUS) {
+    wrapOffset.z = -WORLD_WRAP_SIZE;
+  } else if (flight.position.z < -WORLD_WRAP_RADIUS) {
+    wrapOffset.z = WORLD_WRAP_SIZE;
+  }
+
+  if (wrapOffset.lengthSq() === 0) {
+    return;
+  }
+
+  flight.position.add(wrapOffset);
+  camera.position.add(wrapOffset);
+  view.targetPos.add(wrapOffset);
+}
+
+function updateWorldAnchors() {
+  sea.position.x = flight.position.x;
+  sea.position.z = flight.position.z;
+  horizonGrid.position.x = flight.position.x;
+  horizonGrid.position.z = flight.position.z;
 }
 
 function updateAircraft(delta: number) {
@@ -516,6 +574,141 @@ function updateHud() {
   stickDotEl.style.transform = `translate(${input.pointerRoll * 42}px, ${
     input.pointerPitch * 42
   }px)`;
+  drawMinimap();
+}
+
+function drawMinimapTerrain(centerX: number, centerZ: number) {
+  const image = minimapTerrainCtx.createImageData(MINIMAP_TEXTURE_SIZE, MINIMAP_TEXTURE_SIZE);
+
+  for (let py = 0; py < MINIMAP_TEXTURE_SIZE; py += 1) {
+    for (let px = 0; px < MINIMAP_TEXTURE_SIZE; px += 1) {
+      const worldX = centerX + (px / (MINIMAP_TEXTURE_SIZE - 1) - 0.5) * MINIMAP_WORLD_SPAN;
+      const worldZ = centerZ + (0.5 - py / (MINIMAP_TEXTURE_SIZE - 1)) * MINIMAP_WORLD_SPAN;
+      const color = minimapTerrainColor(heightAt(worldX, worldZ));
+      const index = (py * MINIMAP_TEXTURE_SIZE + px) * 4;
+      image.data[index] = color[0];
+      image.data[index + 1] = color[1];
+      image.data[index + 2] = color[2];
+      image.data[index + 3] = 255;
+    }
+  }
+
+  minimapTerrainCtx.putImageData(image, 0, 0);
+}
+
+function drawMinimap() {
+  const size = minimapCanvas.width;
+  const padding = 7;
+  const mapSize = size - padding * 2;
+  const center = size * 0.5;
+
+  minimapCtx.clearRect(0, 0, size, size);
+  drawMinimapTerrain(flight.position.x, flight.position.z);
+  minimapCtx.drawImage(minimapTerrainCanvas, padding, padding, mapSize, mapSize);
+  minimapCtx.fillStyle = "rgba(5, 12, 18, 0.18)";
+  minimapCtx.fillRect(padding, padding, mapSize, mapSize);
+
+  minimapCtx.strokeStyle = "rgba(125, 229, 255, 0.22)";
+  minimapCtx.lineWidth = 1;
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(size * 0.5, padding);
+  minimapCtx.lineTo(size * 0.5, size - padding);
+  minimapCtx.moveTo(padding, size * 0.5);
+  minimapCtx.lineTo(size - padding, size * 0.5);
+  minimapCtx.stroke();
+
+  drawMinimapLodFootprint(padding, mapSize);
+  drawMinimapWrapBoundaries(padding, mapSize);
+
+  minimapCtx.strokeStyle = "rgba(255, 231, 157, 0.9)";
+  minimapCtx.lineWidth = 2;
+  minimapCtx.strokeRect(padding + 1, padding + 1, mapSize - 2, mapSize - 2);
+
+  forward.set(0, 0, -1).applyQuaternion(flight.quaternion);
+  const heading = Math.atan2(forward.x, forward.z);
+  drawMinimapAircraft(center, center, heading, 1);
+}
+
+function drawMinimapLodFootprint(padding: number, mapSize: number) {
+  const sharpSpan = (TERRAIN_LEVELS[1].outer / MINIMAP_WORLD_SPAN) * mapSize;
+  const midSpan = (TERRAIN_LEVELS[2].outer / MINIMAP_WORLD_SPAN) * mapSize;
+  const center = padding + mapSize * 0.5;
+
+  minimapCtx.strokeStyle = "rgba(125, 229, 255, 0.2)";
+  minimapCtx.lineWidth = 1;
+  minimapCtx.strokeRect(center - midSpan * 0.5, center - midSpan * 0.5, midSpan, midSpan);
+  minimapCtx.strokeStyle = "rgba(125, 229, 255, 0.4)";
+  minimapCtx.strokeRect(center - sharpSpan * 0.5, center - sharpSpan * 0.5, sharpSpan, sharpSpan);
+}
+
+function drawMinimapWrapBoundaries(padding: number, mapSize: number) {
+  const halfSpan = MINIMAP_WORLD_SPAN * 0.5;
+
+  minimapCtx.save();
+  minimapCtx.strokeStyle = "rgba(255, 231, 157, 0.75)";
+  minimapCtx.lineWidth = 2;
+  minimapCtx.setLineDash([5, 4]);
+
+  for (const boundary of [-WORLD_WRAP_RADIUS, WORLD_WRAP_RADIUS]) {
+    const dx = boundary - flight.position.x;
+    if (Math.abs(dx) <= halfSpan) {
+      const x = padding + (dx / MINIMAP_WORLD_SPAN + 0.5) * mapSize;
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(x, padding);
+      minimapCtx.lineTo(x, padding + mapSize);
+      minimapCtx.stroke();
+    }
+
+    const dz = boundary - flight.position.z;
+    if (Math.abs(dz) <= halfSpan) {
+      const y = padding + (0.5 - dz / MINIMAP_WORLD_SPAN) * mapSize;
+      minimapCtx.beginPath();
+      minimapCtx.moveTo(padding, y);
+      minimapCtx.lineTo(padding + mapSize, y);
+      minimapCtx.stroke();
+    }
+  }
+
+  minimapCtx.restore();
+}
+
+function minimapTerrainColor(height: number) {
+  if (height < SEA_LEVEL) {
+    return [25, 88, 112];
+  }
+
+  if (height < 28) {
+    return [72, 117, 84];
+  }
+
+  if (height < 170) {
+    return [116, 139, 87];
+  }
+
+  if (height < 330) {
+    return [143, 132, 105];
+  }
+
+  return [214, 208, 188];
+}
+
+function drawMinimapAircraft(x: number, y: number, heading: number, alpha: number) {
+  minimapCtx.save();
+  minimapCtx.translate(x, y);
+  minimapCtx.rotate(heading);
+  minimapCtx.globalAlpha = alpha;
+  minimapCtx.fillStyle = "#ffe79d";
+  minimapCtx.strokeStyle = "#07121b";
+  minimapCtx.lineWidth = 1.5;
+  minimapCtx.beginPath();
+  minimapCtx.moveTo(0, -8);
+  minimapCtx.lineTo(6, 7);
+  minimapCtx.lineTo(0, 4);
+  minimapCtx.lineTo(-6, 7);
+  minimapCtx.closePath();
+  minimapCtx.fill();
+  minimapCtx.stroke();
+  minimapCtx.restore();
 }
 
 function createF14() {
@@ -947,44 +1140,49 @@ function taperedBoxGeometry({
 
 function createTerrainSystem() {
   const group = new THREE.Group();
-  const levels = [
-    { outer: 6800, inner: 0, segments: 56 },
-    { outer: 26000, inner: 6800, segments: 44 },
-    { outer: 86000, inner: 26000, segments: 34 },
-  ];
+  const material = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    roughness: 0.95,
+    metalness: 0.02,
+    flatShading: true,
+  });
   let anchorX = Number.POSITIVE_INFINITY;
   let anchorZ = Number.POSITIVE_INFINITY;
   let activeBands = 0;
 
   const update = (position: THREE.Vector3) => {
-    const snap = 2400;
-    const nextX = Math.round(position.x / snap) * snap;
-    const nextZ = Math.round(position.z / snap) * snap;
+    const nextX = Math.round(position.x / TERRAIN_SNAP_SIZE) * TERRAIN_SNAP_SIZE;
+    const nextZ = Math.round(position.z / TERRAIN_SNAP_SIZE) * TERRAIN_SNAP_SIZE;
 
-    if (Math.abs(nextX - anchorX) < snap && Math.abs(nextZ - anchorZ) < snap) {
+    if (
+      Math.abs(nextX - anchorX) < TERRAIN_SNAP_SIZE &&
+      Math.abs(nextZ - anchorZ) < TERRAIN_SNAP_SIZE
+    ) {
       return;
     }
 
     anchorX = nextX;
     anchorZ = nextZ;
+    group.position.set(anchorX, 0, anchorZ);
+
+    for (const child of group.children) {
+      if (child instanceof THREE.Mesh) {
+        child.geometry.dispose();
+      }
+    }
     group.clear();
 
-    for (const level of levels) {
+    for (const level of TERRAIN_LEVELS) {
       const patch = new THREE.Mesh(
         terrainGeometry(level.outer, level.inner, level.segments, anchorX, anchorZ),
-        new THREE.MeshStandardMaterial({
-          vertexColors: true,
-          roughness: 0.95,
-          metalness: 0.02,
-          flatShading: true,
-        }),
+        material,
       );
       patch.receiveShadow = true;
       patch.castShadow = false;
       group.add(patch);
     }
 
-    activeBands = levels.length;
+    activeBands = TERRAIN_LEVELS.length;
   };
 
   return {
@@ -1009,27 +1207,13 @@ function terrainGeometry(
   const positions: number[] = [];
   const colors: number[] = [];
 
-  for (let ix = 0; ix < segments; ix += 1) {
-    for (let iz = 0; iz < segments; iz += 1) {
-      const x0 = -half + ix * step + offsetX;
-      const z0 = -half + iz * step + offsetZ;
-      const x1 = x0 + step;
-      const z1 = z0 + step;
-      const centerX = (x0 + x1) * 0.5 - offsetX;
-      const centerZ = (z0 + z1) * 0.5 - offsetZ;
-
-      if (innerSize > 0 && Math.abs(centerX) < innerHalf && Math.abs(centerZ) < innerHalf) {
-        continue;
-      }
-
-      const p0 = terrainPoint(x0, z0);
-      const p1 = terrainPoint(x1, z0);
-      const p2 = terrainPoint(x1, z1);
-      const p3 = terrainPoint(x0, z1);
-
-      addTerrainTriangle(positions, colors, p0, p2, p1, offsetX, offsetZ);
-      addTerrainTriangle(positions, colors, p2, p0, p3, offsetX, offsetZ);
-    }
+  if (innerSize <= 0) {
+    addTerrainRect(positions, colors, -half, half, -half, half, step, offsetX, offsetZ);
+  } else {
+    addTerrainRect(positions, colors, -half, half, innerHalf, half, step, offsetX, offsetZ);
+    addTerrainRect(positions, colors, -half, half, -half, -innerHalf, step, offsetX, offsetZ);
+    addTerrainRect(positions, colors, -half, -innerHalf, -innerHalf, innerHalf, step, offsetX, offsetZ);
+    addTerrainRect(positions, colors, innerHalf, half, -innerHalf, innerHalf, step, offsetX, offsetZ);
   }
 
   const geometry = new THREE.BufferGeometry();
@@ -1037,6 +1221,59 @@ function terrainGeometry(
   geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
   return geometry;
+}
+
+function addTerrainRect(
+  positions: number[],
+  colors: number[],
+  minX: number,
+  maxX: number,
+  minZ: number,
+  maxZ: number,
+  targetStep: number,
+  offsetX: number,
+  offsetZ: number,
+) {
+  if (maxX <= minX || maxZ <= minZ) {
+    return;
+  }
+
+  const xSegments = Math.max(1, Math.ceil((maxX - minX) / targetStep));
+  const zSegments = Math.max(1, Math.ceil((maxZ - minZ) / targetStep));
+
+  for (let ix = 0; ix < xSegments; ix += 1) {
+    for (let iz = 0; iz < zSegments; iz += 1) {
+      const x0 = offsetX + THREE.MathUtils.lerp(minX, maxX, ix / xSegments);
+      const z0 = offsetZ + THREE.MathUtils.lerp(minZ, maxZ, iz / zSegments);
+      const x1 = offsetX + THREE.MathUtils.lerp(minX, maxX, (ix + 1) / xSegments);
+      const z1 = offsetZ + THREE.MathUtils.lerp(minZ, maxZ, (iz + 1) / zSegments);
+
+      addTerrainCell(positions, colors, x0, z0, x1, z1, offsetX, offsetZ);
+    }
+  }
+}
+
+function addTerrainCell(
+  positions: number[],
+  colors: number[],
+  x0: number,
+  z0: number,
+  x1: number,
+  z1: number,
+  offsetX: number,
+  offsetZ: number,
+) {
+  const p0 = terrainPoint(x0, z0);
+  const p1 = terrainPoint(x1, z0);
+  const p2 = terrainPoint(x1, z1);
+  const p3 = terrainPoint(x0, z1);
+
+  if (Math.max(p0.y, p1.y, p2.y, p3.y) < SEA_LEVEL - 6) {
+    return;
+  }
+
+  addTerrainTriangle(positions, colors, p0, p2, p1, offsetX, offsetZ);
+  addTerrainTriangle(positions, colors, p2, p0, p3, offsetX, offsetZ);
 }
 
 function addTerrainTriangle(
@@ -1071,14 +1308,16 @@ function terrainPoint(x: number, z: number) {
 }
 
 function heightAt(x: number, z: number) {
+  const wx = x / WORLD_WRAP_SIZE;
+  const wz = z / WORLD_WRAP_SIZE;
   const broad =
-    Math.sin(x * 0.00055 + 1.7) * 90 +
-    Math.cos(z * 0.00048 - 0.9) * 78 +
-    Math.sin((x + z) * 0.00036) * 105;
+    Math.sin(wx * TAU * 18 + 1.7) * 90 +
+    Math.cos(wz * TAU * 15 - 0.9) * 78 +
+    Math.sin((wx + wz) * TAU * 7) * 105;
   const ridges =
-    Math.abs(Math.sin(x * 0.0012 + z * 0.0005)) * 82 +
-    Math.abs(Math.cos(z * 0.0011 - x * 0.00022)) * 46;
-  const plateau = Math.sin(x * 0.00012 - z * 0.00015) * 180;
+    Math.abs(Math.sin((wx * 38 + wz * 16) * TAU)) * 82 +
+    Math.abs(Math.cos((wz * 31 - wx * 6) * TAU)) * 46;
+  const plateau = Math.sin((wx * 4 - wz * 5) * TAU) * 180;
   return broad + ridges + plateau - 165;
 }
 
@@ -1092,7 +1331,7 @@ function terrainColor(
   const normal = new THREE.Triangle(a, b, c).getNormal(new THREE.Vector3());
   const sunAmount = THREE.MathUtils.clamp(normal.dot(new THREE.Vector3(0.5, 0.72, 0.28)), 0, 1);
 
-  if (height < -42) {
+  if (height < SEA_LEVEL + 10) {
     color.set(0x255f70);
   } else if (height < 28) {
     color.set(0x4d7352);
@@ -1120,7 +1359,7 @@ function createHorizonMarkers() {
   for (let i = 0; i < 72; i += 1) {
     const marker = new THREE.Mesh(new THREE.BoxGeometry(18, 180, 18), material);
     const angle = (i / 72) * Math.PI * 2;
-    const radius = 36000;
+    const radius = 62000;
     marker.position.set(Math.cos(angle) * radius, 120, Math.sin(angle) * radius);
     marker.rotation.y = -angle;
     group.add(marker);
@@ -1195,8 +1434,8 @@ function positiveDegrees(radians: number) {
   return ((THREE.MathUtils.radToDeg(radians) % 360) + 360) % 360;
 }
 
-function mustElement(selector: string) {
-  const element = document.querySelector<HTMLElement>(selector);
+function mustElement<T extends HTMLElement = HTMLElement>(selector: string) {
+  const element = document.querySelector<T>(selector);
 
   if (!element) {
     throw new Error(`Missing ${selector} element`);
