@@ -51,6 +51,7 @@ scene.add(sun.target);
 type FlightState = {
   position: THREE.Vector3;
   quaternion: THREE.Quaternion;
+  angularVelocity: THREE.Vector3;
   pitch: number;
   yaw: number;
   roll: number;
@@ -83,6 +84,7 @@ declare global {
 const flight: FlightState = {
   position: new THREE.Vector3(0, 520, 1200),
   quaternion: new THREE.Quaternion(),
+  angularVelocity: new THREE.Vector3(),
   pitch: THREE.MathUtils.degToRad(-1),
   yaw: THREE.MathUtils.degToRad(180),
   roll: 0,
@@ -103,7 +105,13 @@ const clock = new THREE.Clock();
 let running = true;
 let animationFrameId = 0;
 const forward = new THREE.Vector3();
-const up = new THREE.Vector3();
+const right = new THREE.Vector3();
+const localPitchAxis = new THREE.Vector3(1, 0, 0);
+const localYawAxis = new THREE.Vector3(0, 1, 0);
+const localRollAxis = new THREE.Vector3(0, 0, 1);
+const worldYawAxis = new THREE.Vector3(0, 1, 0);
+const localRotation = new THREE.Quaternion();
+const attitudeEuler = new THREE.Euler(0, 0, 0, "YXZ");
 const cameraTarget = new THREE.Vector3();
 const cameraDesired = new THREE.Vector3();
 
@@ -129,6 +137,8 @@ const view: {
   lastX: 0,
   lastY: 0,
 };
+
+syncQuaternionFromFlightAngles();
 
 const speedEl = mustElement("#speed");
 const altitudeEl = mustElement("#altitude");
@@ -350,36 +360,51 @@ function updateFlight(delta: number) {
     1,
   );
 
+  forward.set(0, 0, -1).applyQuaternion(flight.quaternion);
+
   const targetSpeed = THREE.MathUtils.lerp(190, 760, flight.throttle);
-  const diveAssist = THREE.MathUtils.clamp(-Math.sin(flight.pitch), -0.35, 0.35) * 95;
+  const diveAssist = THREE.MathUtils.clamp(-forward.y, -0.35, 0.35) * 95;
   flight.speed = damp(flight.speed, targetSpeed + diveAssist, 0.82, delta);
 
   const authority = THREE.MathUtils.clamp((flight.speed - 140) / 430, 0.28, 1.2);
-  flight.pitch += input.pitch * delta * 0.82 * authority;
-  flight.pitch = THREE.MathUtils.clamp(flight.pitch, -0.9, 0.72);
-  flight.roll += input.roll * delta * 1.35 * authority;
-  flight.roll = THREE.MathUtils.clamp(flight.roll, -1.28, 1.28);
-
-  const bankTurn = Math.sin(flight.roll) * 0.52 * authority;
-  flight.yaw -= (bankTurn + input.yaw * 0.34) * delta;
-  flight.roll = damp(flight.roll, 0, input.roll === 0 ? 0.34 : 0.08, delta);
-
-  const ground = heightAt(flight.position.x, flight.position.z) + 72;
-  const minPitch = flight.position.y < ground + 110 ? -0.02 : -0.9;
-  flight.pitch = Math.max(flight.pitch, minPitch);
-
-  flight.quaternion.setFromEuler(
-    new THREE.Euler(flight.pitch, flight.yaw, -flight.roll, "YXZ"),
+  flight.angularVelocity.x = damp(
+    flight.angularVelocity.x,
+    input.pitch * 1.08 * authority,
+    7,
+    delta,
+  );
+  flight.angularVelocity.y = damp(
+    flight.angularVelocity.y,
+    input.yaw * 0.58 * authority,
+    6,
+    delta,
+  );
+  flight.angularVelocity.z = damp(
+    flight.angularVelocity.z,
+    input.roll * 2.25 * authority,
+    8,
+    delta,
   );
 
+  applyLocalRotation(localPitchAxis, flight.angularVelocity.x * delta);
+  applyLocalRotation(localYawAxis, -flight.angularVelocity.y * delta);
+  applyLocalRotation(localRollAxis, -flight.angularVelocity.z * delta);
+  syncFlightAnglesFromQuaternion();
+
+  right.set(1, 0, 0).applyQuaternion(flight.quaternion);
+  const bankTurn = -right.y * 0.52 * authority;
+  applyWorldRotation(worldYawAxis, -bankTurn * delta);
+  syncFlightAnglesFromQuaternion();
+
+  const ground = heightAt(flight.position.x, flight.position.z) + 72;
+
   forward.set(0, 0, -1).applyQuaternion(flight.quaternion);
-  up.set(0, 1, 0).applyQuaternion(flight.quaternion);
   flight.position.addScaledVector(forward, flight.speed * delta);
 
   if (flight.position.y < ground) {
     flight.position.y = ground;
-    flight.pitch = Math.max(flight.pitch, 0.03);
     flight.speed = Math.max(flight.speed * 0.965, 190);
+    flight.angularVelocity.x = Math.max(flight.angularVelocity.x, 0);
   }
 }
 
@@ -436,18 +461,18 @@ function updateCamera(delta: number, mode: ViewMode) {
   const cameraHeight = THREE.MathUtils.lerp(15, 25, flight.speed / 760);
 
   forward.set(0, 0, -1).applyQuaternion(flight.quaternion);
-  up.set(0, 1, 0).applyQuaternion(flight.quaternion);
 
   cameraDesired
     .copy(flight.position)
     .addScaledVector(forward, -chaseDistance)
-    .addScaledVector(up, cameraHeight);
+    .addScaledVector(worldYawAxis, cameraHeight);
   camera.position.lerp(cameraDesired, 1 - Math.exp(-delta * 4.2));
 
   cameraTarget
     .copy(flight.position)
     .addScaledVector(forward, 118)
-    .addScaledVector(up, 6);
+    .addScaledVector(worldYawAxis, 3);
+  camera.up.copy(worldYawAxis);
   camera.lookAt(cameraTarget);
 
   sun.target.position.copy(flight.position);
@@ -474,7 +499,8 @@ function toggleViewMode() {
 
 function updateHud() {
   const altitude = Math.max(0, flight.position.y - heightAt(flight.position.x, flight.position.z));
-  const headingDegrees = positiveDegrees(Math.PI - flight.yaw);
+  forward.set(0, 0, -1).applyQuaternion(flight.quaternion);
+  const headingDegrees = positiveDegrees(Math.atan2(-forward.x, forward.z));
 
   speedEl.textContent = Math.round(flight.speed).toString().padStart(3, "0");
   altitudeEl.textContent = Math.round(altitude).toString().padStart(4, "0");
@@ -1132,6 +1158,37 @@ function bufferGeometryFromPositions(positions: number[]) {
 
 function damp(current: number, target: number, lambda: number, delta: number) {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-lambda * delta));
+}
+
+function applyLocalRotation(axis: THREE.Vector3, radians: number) {
+  if (Math.abs(radians) < 0.000001) {
+    return;
+  }
+
+  localRotation.setFromAxisAngle(axis, radians);
+  flight.quaternion.multiply(localRotation).normalize();
+}
+
+function applyWorldRotation(axis: THREE.Vector3, radians: number) {
+  if (Math.abs(radians) < 0.000001) {
+    return;
+  }
+
+  localRotation.setFromAxisAngle(axis, radians);
+  flight.quaternion.premultiply(localRotation).normalize();
+}
+
+function syncQuaternionFromFlightAngles() {
+  flight.quaternion.setFromEuler(
+    attitudeEuler.set(flight.pitch, flight.yaw, -flight.roll, "YXZ"),
+  );
+}
+
+function syncFlightAnglesFromQuaternion() {
+  attitudeEuler.setFromQuaternion(flight.quaternion, "YXZ");
+  flight.pitch = attitudeEuler.x;
+  flight.yaw = attitudeEuler.y;
+  flight.roll = -attitudeEuler.z;
 }
 
 function positiveDegrees(radians: number) {
