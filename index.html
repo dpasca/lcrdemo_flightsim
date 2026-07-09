@@ -8,18 +8,96 @@
   </head>
   <body>
     <canvas id="sim"></canvas>
-    <div id="hud" aria-label="Flight instruments">
-      <section class="hud-panel hud-panel--left">
-        <div class="readout"><span>SPD</span><strong id="speed">000</strong></div>
-        <div class="readout"><span>ALT</span><strong id="altitude">0000</strong></div>
-        <div class="readout"><span>THR</span><strong id="throttle">00%</strong></div>
-      </section>
-      <div class="reticle" aria-hidden="true"></div>
-      <section class="hud-panel hud-panel--right">
-        <div class="readout"><span>BNK</span><strong id="bank">00</strong></div>
-        <div class="readout"><span>HDG</span><strong id="heading">000</strong></div>
-        <div class="readout"><span>LOD</span><strong id="lod">3</strong></div>
-      </section>
+    <div id="hud" aria-label="Modern jet head-up display">
+      <svg
+        id="hud-combiner"
+        class="hud-combiner"
+        viewBox="-500 -300 1000 600"
+        preserveAspectRatio="xMidYMid meet"
+        aria-hidden="true"
+      >
+        <defs>
+          <clipPath id="hud-ladder-clip">
+            <rect x="-270" y="-176" width="540" height="352" />
+          </clipPath>
+        </defs>
+
+        <g class="hud-glass">
+          <path class="hud-canopy-line" d="M -458 -206 H -382 M 382 -206 H 458" />
+          <path class="hud-canopy-line" d="M -456 214 H -382 M 382 214 H 456" />
+          <path class="hud-canopy-line hud-canopy-line--dim" d="M -134 244 H 134" />
+
+          <g class="hud-ladder-window" clip-path="url(#hud-ladder-clip)">
+            <g id="pitch-ladder"></g>
+          </g>
+
+          <g class="bank-scale" transform="translate(0 -176)">
+            <path class="hud-scale-line" d="M -116 0 A 116 116 0 0 1 116 0" />
+            <g class="bank-ticks">
+              <line transform="rotate(-60)" x1="0" y1="-116" x2="0" y2="-129" />
+              <line transform="rotate(-45)" x1="0" y1="-116" x2="0" y2="-124" />
+              <line transform="rotate(-30)" x1="0" y1="-116" x2="0" y2="-129" />
+              <line transform="rotate(-20)" x1="0" y1="-116" x2="0" y2="-123" />
+              <line transform="rotate(-10)" x1="0" y1="-116" x2="0" y2="-123" />
+              <line x1="0" y1="-116" x2="0" y2="-132" />
+              <line transform="rotate(10)" x1="0" y1="-116" x2="0" y2="-123" />
+              <line transform="rotate(20)" x1="0" y1="-116" x2="0" y2="-123" />
+              <line transform="rotate(30)" x1="0" y1="-116" x2="0" y2="-129" />
+              <line transform="rotate(45)" x1="0" y1="-116" x2="0" y2="-124" />
+              <line transform="rotate(60)" x1="0" y1="-116" x2="0" y2="-129" />
+            </g>
+            <g id="bank-pointer">
+              <path class="hud-pointer-fill" d="M 0 -141 L -10 -122 H 10 Z" />
+            </g>
+          </g>
+
+          <g class="hud-boresight">
+            <path d="M -112 0 H -28 M 28 0 H 112" />
+            <path d="M 0 -54 V -20 M 0 20 V 54" />
+            <circle r="4" />
+          </g>
+
+          <g id="flight-path-marker" class="flight-path-marker">
+            <circle r="15" />
+            <path d="M -48 0 H -15 M 15 0 H 48 M 0 -34 V -15" />
+          </g>
+
+          <g class="hud-tape hud-tape--speed" transform="translate(-366 0)">
+            <text class="hud-label" x="-74" y="-164">KCAS</text>
+            <path class="hud-tape-rail" d="M 0 -146 V 146" />
+            <g id="speed-ticks"></g>
+            <path class="hud-value-box" d="M -83 -25 H 44 L 63 0 L 44 25 H -83 Z" />
+            <text id="speed" class="hud-value hud-value--speed" x="-18" y="8">000</text>
+          </g>
+
+          <g class="hud-tape hud-tape--altitude" transform="translate(366 0)">
+            <text class="hud-label" x="74" y="-164">ALT</text>
+            <path class="hud-tape-rail" d="M 0 -146 V 146" />
+            <g id="altitude-ticks"></g>
+            <path class="hud-value-box" d="M 83 -25 H -44 L -63 0 L -44 25 H 83 Z" />
+            <text id="altitude" class="hud-value hud-value--altitude" x="20" y="8">00000</text>
+          </g>
+
+          <g class="hud-heading-tape" transform="translate(0 -248)">
+            <path class="hud-heading-frame" d="M -206 -26 H 206 M -206 26 H 206" />
+            <g id="heading-ticks"></g>
+            <path class="hud-heading-pointer" d="M 0 33 L -12 51 H 12 Z" />
+            <rect class="hud-heading-box" x="-38" y="-18" width="76" height="36" />
+            <text id="heading" class="hud-value hud-value--heading" x="0" y="9">180</text>
+          </g>
+
+          <g class="hud-status" transform="translate(260 122)">
+            <text class="hud-label" x="0" y="-54">LOAD</text>
+            <text id="gforce" class="hud-status-value" x="82" y="-54">1.0</text>
+            <text class="hud-label" x="0" y="-25">AOA</text>
+            <text id="alpha" class="hud-status-value" x="82" y="-25">00</text>
+            <text id="throttle" class="hud-status-line" x="0" y="10">THR 58%</text>
+            <text id="bank" class="hud-status-line" x="0" y="39">00 LVL</text>
+            <text id="lod" class="hud-status-line hud-status-line--dim" x="0" y="68">LOD 4</text>
+          </g>
+        </g>
+      </svg>
+      <div class="hud-projection-grain" aria-hidden="true"></div>
       <canvas id="minimap" class="minimap" width="160" height="160" aria-label="World minimap"></canvas>
       <div class="throttle-rail" aria-hidden="true"><div id="throttle-fill"></div></div>
       <div class="stick-dot" id="stick-dot" aria-hidden="true"></div>

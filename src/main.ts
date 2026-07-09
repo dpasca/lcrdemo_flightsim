@@ -46,6 +46,9 @@ const WORLD_WRAP_RADIUS = 178000;
 const WORLD_WRAP_SIZE = WORLD_WRAP_RADIUS * 2;
 const MINIMAP_TEXTURE_SIZE = 128;
 const MINIMAP_WORLD_SPAN = TERRAIN_LEVELS[TERRAIN_LEVELS.length - 1].outer;
+const HUD_VIEWBOX_HALF_HEIGHT = 300;
+const HUD_HEADING_PIXELS_PER_DEGREE = 6;
+const CHASE_CAMERA_ROLL_RESPONSE = 3.2;
 
 const hemiLight = new THREE.HemisphereLight(0xc7edf2, 0x4b4538, 1.85);
 scene.add(hemiLight);
@@ -90,6 +93,17 @@ type FlightState = {
   roll: number;
   throttle: number;
   speed: number;
+  gForce: number;
+  alpha: number;
+};
+
+type VerticalTapeParams = {
+  tickStep: number;
+  labelStep: number;
+  pixelsPerUnit: number;
+  side: "left" | "right";
+  minValue: number;
+  formatLabel: (value: number) => string;
 };
 
 type Inputs = {
@@ -123,6 +137,8 @@ const flight: FlightState = {
   roll: 0,
   throttle: 0.58,
   speed: 330,
+  gForce: 1,
+  alpha: 0,
 };
 
 const input: Inputs = {
@@ -134,11 +150,34 @@ const input: Inputs = {
   pointerRoll: 0,
 };
 
+const SPEED_TAPE_PARAMS: VerticalTapeParams = {
+  tickStep: 10,
+  labelStep: 20,
+  pixelsPerUnit: 1.48,
+  side: "left",
+  minValue: 0,
+  formatLabel: (value) => Math.round(value).toString(),
+};
+
+const ALTITUDE_TAPE_PARAMS: VerticalTapeParams = {
+  tickStep: 100,
+  labelStep: 200,
+  pixelsPerUnit: 0.22,
+  side: "right",
+  minValue: 0,
+  formatLabel: (value) => Math.round(value).toString(),
+};
+
 const clock = new THREE.Clock();
 let running = true;
 let animationFrameId = 0;
+let cameraRoll = 0;
 const forward = new THREE.Vector3();
 const right = new THREE.Vector3();
+const cameraForward = new THREE.Vector3();
+const cameraRight = new THREE.Vector3();
+const cameraUp = new THREE.Vector3();
+const horizonRight = new THREE.Vector3();
 const localPitchAxis = new THREE.Vector3(1, 0, 0);
 const localYawAxis = new THREE.Vector3(0, 1, 0);
 const localRollAxis = new THREE.Vector3(0, 0, 1);
@@ -174,12 +213,20 @@ const view: {
 
 syncQuaternionFromFlightAngles();
 
-const speedEl = mustElement("#speed");
-const altitudeEl = mustElement("#altitude");
-const throttleEl = mustElement("#throttle");
-const bankEl = mustElement("#bank");
-const headingEl = mustElement("#heading");
-const lodEl = mustElement("#lod");
+const pitchLadderEl = mustElement<SVGGElement>("#pitch-ladder");
+const speedTicksEl = mustElement<SVGGElement>("#speed-ticks");
+const altitudeTicksEl = mustElement<SVGGElement>("#altitude-ticks");
+const headingTicksEl = mustElement<SVGGElement>("#heading-ticks");
+const bankPointerEl = mustElement<SVGGElement>("#bank-pointer");
+const flightPathMarkerEl = mustElement<SVGGElement>("#flight-path-marker");
+const speedEl = mustElement<SVGTextElement>("#speed");
+const altitudeEl = mustElement<SVGTextElement>("#altitude");
+const throttleEl = mustElement<SVGTextElement>("#throttle");
+const bankEl = mustElement<SVGTextElement>("#bank");
+const headingEl = mustElement<SVGTextElement>("#heading");
+const lodEl = mustElement<SVGTextElement>("#lod");
+const gForceEl = mustElement<SVGTextElement>("#gforce");
+const alphaEl = mustElement<SVGTextElement>("#alpha");
 const throttleFillEl = mustElement("#throttle-fill");
 const stickDotEl = mustElement("#stick-dot");
 const viewBadgeEl = mustElement("#view-badge");
@@ -451,6 +498,20 @@ function updateFlight(delta: number) {
     flight.speed = Math.max(flight.speed * 0.965, 190);
     flight.angularVelocity.x = Math.max(flight.angularVelocity.x, 0);
   }
+
+  const speedAuthority = THREE.MathUtils.clamp(flight.speed / 380, 0.35, 2.1);
+  const pitchLoad = Math.abs(flight.angularVelocity.x) * speedAuthority;
+  const bankLoad = Math.abs(Math.sin(flight.roll)) * 0.72;
+  const pullLoad = input.pitch >= 0 ? input.pitch * 1.45 : input.pitch * 0.65;
+  const targetG = THREE.MathUtils.clamp(1 + pitchLoad + bankLoad + pullLoad, 0.25, 8.5);
+  const targetAlpha = THREE.MathUtils.clamp(
+    input.pitch * 12.5 + flight.angularVelocity.x * 3.5 - forward.y * 2,
+    -9,
+    25,
+  );
+
+  flight.gForce = damp(flight.gForce, targetG, 5.5, delta);
+  flight.alpha = damp(flight.alpha, targetAlpha, 6, delta);
 }
 
 function wrapWorldIfNeeded() {
@@ -526,7 +587,9 @@ function updateCamera(delta: number, mode: ViewMode) {
     );
     camera.position.lerp(cameraDesired, 1 - Math.exp(-delta * 8));
     cameraTarget.copy(view.targetPos);
+    camera.up.copy(worldYawAxis);
     camera.lookAt(cameraTarget);
+    cameraRoll = dampAngle(cameraRoll, 0, 8, delta);
 
     sun.target.position.copy(view.targetPos);
     sun.position.copy(view.targetPos).add(new THREE.Vector3(-580, 940, 360));
@@ -550,6 +613,8 @@ function updateCamera(delta: number, mode: ViewMode) {
     .addScaledVector(worldYawAxis, 3);
   camera.up.copy(worldYawAxis);
   camera.lookAt(cameraTarget);
+  cameraRoll = dampAngle(cameraRoll, -flight.roll, CHASE_CAMERA_ROLL_RESPONSE, delta);
+  camera.rotateZ(cameraRoll);
 
   sun.target.position.copy(flight.position);
   sun.position.copy(flight.position).add(new THREE.Vector3(-580, 940, 360));
@@ -577,22 +642,262 @@ function updateHud() {
   const altitude = Math.max(0, flight.position.y - heightAt(flight.position.x, flight.position.z));
   forward.set(0, 0, -1).applyQuaternion(flight.quaternion);
   const headingDegrees = positiveDegrees(Math.atan2(-forward.x, forward.z));
+  const rollDegrees = THREE.MathUtils.radToDeg(flight.roll);
+  const cameraPitchDegrees = calcCameraPitchDegrees();
+  const cameraHorizonRollDegrees = calcCameraHorizonRollDegrees();
 
   speedEl.textContent = Math.round(flight.speed).toString().padStart(3, "0");
-  altitudeEl.textContent = Math.round(altitude).toString().padStart(4, "0");
-  throttleEl.textContent = `${Math.round(flight.throttle * 100)
+  altitudeEl.textContent = Math.round(altitude).toString().padStart(5, "0");
+  throttleEl.textContent = `THR ${Math.round(flight.throttle * 100)
     .toString()
     .padStart(2, "0")}%`;
-  bankEl.textContent = Math.round(THREE.MathUtils.radToDeg(flight.roll))
-    .toString()
-    .padStart(2, "0");
+  bankEl.textContent = formatBank(rollDegrees);
   headingEl.textContent = Math.round(headingDegrees).toString().padStart(3, "0");
-  lodEl.textContent = terrain.activeBands.toString();
+  lodEl.textContent = `LOD ${terrain.activeBands}`;
+  gForceEl.textContent = flight.gForce.toFixed(1);
+  alphaEl.textContent = Math.round(flight.alpha).toString().padStart(2, "0");
   throttleFillEl.style.height = `${flight.throttle * 100}%`;
   stickDotEl.style.transform = `translate(${input.pointerRoll * 42}px, ${
     input.pointerPitch * 42
   }px)`;
+  bankPointerEl.setAttribute("transform", `rotate(${svgNumber(rollDegrees)})`);
+  flightPathMarkerEl.setAttribute(
+    "transform",
+    `translate(${svgNumber(THREE.MathUtils.clamp(input.yaw * 32, -44, 44))} ${svgNumber(
+      THREE.MathUtils.clamp(-flight.alpha * 2.2, -44, 34),
+    )})`,
+  );
+
+  renderPitchLadder(cameraPitchDegrees, cameraHorizonRollDegrees);
+  renderVerticalTape(speedTicksEl, flight.speed, SPEED_TAPE_PARAMS);
+  renderVerticalTape(altitudeTicksEl, altitude, ALTITUDE_TAPE_PARAMS);
+  renderHeadingTape(headingDegrees);
   drawMinimap();
+}
+
+function calcCameraPitchDegrees() {
+  cameraForward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  return THREE.MathUtils.radToDeg(
+    Math.asin(THREE.MathUtils.clamp(cameraForward.y, -0.999, 0.999)),
+  );
+}
+
+function calcCameraHorizonRollDegrees() {
+  cameraForward.set(0, 0, -1).applyQuaternion(camera.quaternion);
+  cameraRight.set(1, 0, 0).applyQuaternion(camera.quaternion);
+  cameraUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
+  horizonRight.crossVectors(cameraForward, worldYawAxis);
+
+  if (horizonRight.lengthSq() < 0.000001) {
+    return 0;
+  }
+
+  horizonRight.normalize();
+
+  let screenX = horizonRight.dot(cameraRight);
+  let screenY = -horizonRight.dot(cameraUp);
+
+  if (screenX < 0) {
+    screenX = -screenX;
+    screenY = -screenY;
+  }
+
+  return THREE.MathUtils.radToDeg(Math.atan2(screenY, screenX));
+}
+
+function pitchAngleToHudY(angleDegrees: number, cameraPitchDegrees: number) {
+  const deltaRadians = THREE.MathUtils.degToRad(angleDegrees - cameraPitchDegrees);
+  const focalScale = HUD_VIEWBOX_HALF_HEIGHT / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5));
+  return -Math.tan(deltaRadians) * focalScale;
+}
+
+function renderPitchLadder(cameraPitchDegrees: number, horizonRollDegrees: number) {
+  const centerAngle = Math.round(cameraPitchDegrees / 5) * 5;
+  const startAngle = centerAngle - 45;
+  const endAngle = centerAngle + 45;
+  let markup = `<g transform="rotate(${svgNumber(horizonRollDegrees)})">`;
+
+  for (let angle = startAngle; angle <= endAngle; angle += 5) {
+    if (Math.abs(angle) > 85) {
+      continue;
+    }
+
+    const y = pitchAngleToHudY(angle, cameraPitchDegrees);
+
+    if (Math.abs(y) > 180) {
+      continue;
+    }
+
+    const isZero = angle === 0;
+    const isMajor = angle % 10 === 0;
+    const width = isZero ? 176 : isMajor ? 126 : 82;
+    const gap = isZero ? 26 : 36;
+    const className = isZero
+      ? "hud-ladder-line hud-ladder-line--zero"
+      : angle > 0
+        ? "hud-ladder-line hud-ladder-line--climb"
+        : "hud-ladder-line hud-ladder-line--dive";
+
+    if (angle < 0) {
+      const segment = (width - gap) / 3;
+      const firstEnd = -gap - segment * 2.08;
+      const secondStart = -gap - segment * 1.4;
+      const secondEnd = -gap - segment * 0.64;
+
+      markup += lineSvg(-width, y, firstEnd, y, className);
+      markup += lineSvg(secondStart, y, secondEnd, y, className);
+      markup += lineSvg(-gap - segment * 0.36, y, -gap, y, className);
+      markup += lineSvg(width, y, -firstEnd, y, className);
+      markup += lineSvg(-secondStart, y, -secondEnd, y, className);
+      markup += lineSvg(gap + segment * 0.36, y, gap, y, className);
+      markup += lineSvg(-width, y, -width, y + 9, className);
+      markup += lineSvg(width, y, width, y + 9, className);
+    } else {
+      markup += lineSvg(-width, y, -gap, y, className);
+      markup += lineSvg(gap, y, width, y, className);
+
+      if (!isZero) {
+        markup += lineSvg(-width, y, -width, y - 9, className);
+        markup += lineSvg(width, y, width, y - 9, className);
+      }
+    }
+
+    if (!isZero && isMajor) {
+      const label = Math.abs(angle).toString();
+      markup += `<text class="hud-ladder-label hud-ladder-label--left" x="${svgNumber(
+        -width - 15,
+      )}" y="${svgNumber(y + 5)}">${label}</text>`;
+      markup += `<text class="hud-ladder-label hud-ladder-label--right" x="${svgNumber(
+        width + 15,
+      )}" y="${svgNumber(y + 5)}">${label}</text>`;
+    }
+  }
+
+  markup += "</g>";
+  pitchLadderEl.innerHTML = markup;
+}
+
+function renderVerticalTape(
+  ticksEl: SVGGElement,
+  currentValue: number,
+  params: VerticalTapeParams,
+) {
+  const visibleUnits = 170 / params.pixelsPerUnit;
+  const firstValue =
+    Math.floor((currentValue - visibleUnits) / params.tickStep) * params.tickStep;
+  const lastValue = currentValue + visibleUnits;
+  const tickDir = params.side === "left" ? 1 : -1;
+  const labelX = params.side === "left" ? -10 : 10;
+  const labelAnchor = params.side === "left" ? "end" : "start";
+  let markup = "";
+
+  for (let value = firstValue; value <= lastValue; value += params.tickStep) {
+    if (value < params.minValue) {
+      continue;
+    }
+
+    const y = (currentValue - value) * params.pixelsPerUnit;
+
+    if (Math.abs(y) > 148) {
+      continue;
+    }
+
+    const isMajor = isMultiple(value, params.labelStep);
+    const tickLength = isMajor ? 36 : 20;
+    markup += lineSvg(0, y, tickDir * tickLength, y, "hud-tape-tick");
+
+    if (isMajor && Math.abs(y) > 30) {
+      markup += `<text class="hud-tape-label" x="${labelX}" y="${svgNumber(
+        y + 5,
+      )}" text-anchor="${labelAnchor}">${params.formatLabel(value)}</text>`;
+    }
+  }
+
+  ticksEl.innerHTML = markup;
+}
+
+function renderHeadingTape(headingDegrees: number) {
+  const tickStep = 5;
+  const visibleDegrees = 36;
+  const firstTick = Math.floor((headingDegrees - visibleDegrees) / tickStep) * tickStep;
+  const lastTick = headingDegrees + visibleDegrees;
+  let markup = "";
+
+  for (let tick = firstTick; tick <= lastTick; tick += tickStep) {
+    const value = wrapDegrees(tick);
+    const delta = signedDegreesDelta(value, headingDegrees);
+    const x = delta * HUD_HEADING_PIXELS_PER_DEGREE;
+
+    if (Math.abs(x) > 210) {
+      continue;
+    }
+
+    const isMajor = isMultiple(value, 10);
+    const tickLength = isMajor ? 21 : 12;
+    markup += lineSvg(x, -26, x, -26 + tickLength, "hud-heading-tick");
+
+    if (isMajor && Math.abs(x) > 34) {
+      markup += `<text class="hud-heading-label" x="${svgNumber(x)}" y="17">${formatHeadingTick(
+        value,
+      )}</text>`;
+    }
+  }
+
+  headingTicksEl.innerHTML = markup;
+}
+
+function lineSvg(x1: number, y1: number, x2: number, y2: number, className: string) {
+  return `<line class="${className}" x1="${svgNumber(x1)}" y1="${svgNumber(
+    y1,
+  )}" x2="${svgNumber(x2)}" y2="${svgNumber(y2)}" />`;
+}
+
+function formatHeadingTick(value: number) {
+  const heading = Math.round(wrapDegrees(value));
+
+  if (heading === 0 || heading === 360) {
+    return "N";
+  }
+
+  if (heading === 90) {
+    return "E";
+  }
+
+  if (heading === 180) {
+    return "S";
+  }
+
+  if (heading === 270) {
+    return "W";
+  }
+
+  return Math.round(heading / 10).toString().padStart(2, "0");
+}
+
+function formatBank(degrees: number) {
+  const rounded = Math.round(Math.abs(degrees));
+
+  if (rounded < 1) {
+    return "00 LVL";
+  }
+
+  return `${rounded.toString().padStart(2, "0")} ${degrees < 0 ? "L" : "R"}`;
+}
+
+function wrapDegrees(degrees: number) {
+  return ((degrees % 360) + 360) % 360;
+}
+
+function signedDegreesDelta(value: number, center: number) {
+  return ((value - center + 540) % 360) - 180;
+}
+
+function isMultiple(value: number, step: number) {
+  return Math.abs(value / step - Math.round(value / step)) < 0.001;
+}
+
+function svgNumber(value: number) {
+  return Number.isFinite(value) ? value.toFixed(2) : "0";
 }
 
 function drawMinimapTerrain(centerX: number, centerZ: number) {
@@ -1650,6 +1955,11 @@ function damp(current: number, target: number, lambda: number, delta: number) {
   return THREE.MathUtils.lerp(current, target, 1 - Math.exp(-lambda * delta));
 }
 
+function dampAngle(current: number, target: number, lambda: number, delta: number) {
+  const difference = Math.atan2(Math.sin(target - current), Math.cos(target - current));
+  return current + difference * (1 - Math.exp(-lambda * delta));
+}
+
 function applyLocalRotation(axis: THREE.Vector3, radians: number) {
   if (Math.abs(radians) < 0.000001) {
     return;
@@ -1685,7 +1995,7 @@ function positiveDegrees(radians: number) {
   return ((THREE.MathUtils.radToDeg(radians) % 360) + 360) % 360;
 }
 
-function mustElement<T extends HTMLElement = HTMLElement>(selector: string) {
+function mustElement<T extends Element = HTMLElement>(selector: string) {
   const element = document.querySelector<T>(selector);
 
   if (!element) {
