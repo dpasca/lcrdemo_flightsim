@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="data:," />
-    <title>F-14 Retro Flight Sim</title>
+    <title>LCR Retro Flight Sim</title>
   </head>
   <body>
     <canvas id="sim"></canvas>
@@ -27,10 +27,12 @@
           <path class="hud-canopy-line" d="M -456 214 H -382 M 382 214 H 456" />
           <path class="hud-canopy-line hud-canopy-line--dim" d="M -134 244 H 134" />
 
+          <!-- Pitch ladder: shows climb/dive attitude relative to the visible horizon. -->
           <g class="hud-ladder-window" clip-path="url(#hud-ladder-clip)">
             <g id="pitch-ladder"></g>
           </g>
 
+          <!-- Bank scale: the moving pointer reports the aircraft's left/right roll angle. -->
           <g class="bank-scale" transform="translate(0 -176)">
             <path class="hud-scale-line" d="M -116 0 A 116 116 0 0 1 116 0" />
             <g class="bank-ticks">
@@ -51,17 +53,20 @@
             </g>
           </g>
 
+          <!-- Boresight: fixed reference for where the aircraft's nose is pointing. -->
           <g class="hud-boresight">
             <path d="M -112 0 H -28 M 28 0 H 112" />
             <path d="M 0 -54 V -20 M 0 20 V 54" />
             <circle r="4" />
           </g>
 
+          <!-- Flight-path marker: estimates where the aircraft is actually travelling. -->
           <g id="flight-path-marker" class="flight-path-marker">
             <circle r="15" />
             <path d="M -48 0 H -15 M 15 0 H 48 M 0 -34 V -15" />
           </g>
 
+          <!-- Airspeed tape: current speed in the box, with nearby values moving past it. -->
           <g class="hud-tape hud-tape--speed" transform="translate(-366 0)">
             <text class="hud-label" x="-74" y="-164">KCAS</text>
             <path class="hud-tape-rail" d="M 0 -146 V 146" />
@@ -70,6 +75,7 @@
             <text id="speed" class="hud-value hud-value--speed" x="-18" y="8">000</text>
           </g>
 
+          <!-- Altitude tape: height above local terrain, not height above sea level. -->
           <g class="hud-tape hud-tape--altitude" transform="translate(366 0)">
             <text class="hud-label" x="74" y="-164">ALT</text>
             <path class="hud-tape-rail" d="M 0 -146 V 146" />
@@ -78,6 +84,7 @@
             <text id="altitude" class="hud-value hud-value--altitude" x="20" y="8">00000</text>
           </g>
 
+          <!-- Heading tape: compass direction under a fixed center pointer. -->
           <g class="hud-heading-tape" transform="translate(0 -248)">
             <path class="hud-heading-frame" d="M -206 -26 H 206 M -206 26 H 206" />
             <g id="heading-ticks"></g>
@@ -86,6 +93,7 @@
             <text id="heading" class="hud-value hud-value--heading" x="0" y="9">180</text>
           </g>
 
+          <!-- Status block: load factor, angle of attack, throttle, bank, and terrain LOD. -->
           <g class="hud-status" transform="translate(260 122)">
             <text class="hud-label" x="0" y="-54">LOAD</text>
             <text id="gforce" class="hud-status-value" x="82" y="-54">1.0</text>
@@ -98,9 +106,12 @@
         </g>
       </svg>
       <div class="hud-projection-grain" aria-hidden="true"></div>
+      <!-- Local terrain and world-wrap awareness. -->
       <canvas id="minimap" class="minimap" width="160" height="160" aria-label="World minimap"></canvas>
+      <!-- Compact visual echoes of throttle and pointer/stick input. -->
       <div class="throttle-rail" aria-hidden="true"><div id="throttle-fill"></div></div>
       <div class="stick-dot" id="stick-dot" aria-hidden="true"></div>
+      <!-- Indicates whether the camera is following the aircraft or orbiting it. -->
       <div id="view-badge" class="view-badge" aria-hidden="true">CHASE</div>
     </div>
     <script type="module" src="/src/main.ts"></script>
