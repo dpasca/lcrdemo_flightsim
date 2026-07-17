@@ -1,6 +1,6 @@
 # LCR Retro Flight Sim
 
-![A low-poly variable-sweep jet banking above procedural coastal terrain with a modern head-up display](docs/images/lcr-retro-flight-sim.png)
+![A low-poly variable-sweep jet banking above procedural coastal terrain with a modern head-up display](docs/images/lcr-retro-flight-sim-hud.png)
 
 *Rear follow-camera view from the current Three.js build with the in-game HUD active.*
 
