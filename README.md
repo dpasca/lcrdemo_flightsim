@@ -1,8 +1,8 @@
 # LCR Retro Flight Sim
 
-![A low-poly variable-sweep jet flying above procedural coastal terrain](docs/images/lcr-retro-flight-sim.png)
+![A low-poly variable-sweep jet banking above procedural coastal terrain with a modern head-up display](docs/images/lcr-retro-flight-sim.png)
 
-*Rear follow-camera view from the current Three.js build; the in-game HUD is hidden for presentation.*
+*Rear follow-camera view from the current Three.js build with the in-game HUD active.*
 
 This development demo was built with [Little Control Room](https://github.com/dpasca/LittleControlRoom), using GPT-5.5 and GPT-5.6-Sol.
 
